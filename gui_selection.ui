@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>Form</class>
+ <widget class="QWidget" name="Form">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>640</width>
+    <height>480</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>Form</string>
+  </property>
+  <widget class="QPushButton" name="prevButton">
+   <property name="geometry">
+    <rect>
+     <x>390</x>
+     <y>440</y>
+     <width>113</width>
+     <height>32</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>prev</string>
+   </property>
+  </widget>
+  <widget class="QPushButton" name="nextButton">
+   <property name="geometry">
+    <rect>
+     <x>520</x>
+     <y>440</y>
+     <width>113</width>
+     <height>32</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>next</string>
+   </property>
+  </widget>
+  <widget class="QLabel" name="imgCell">
+   <property name="geometry">
+    <rect>
+     <x>0</x>
+     <y>0</y>
+     <width>256</width>
+     <height>256</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>TextLabel</string>
+   </property>
+   <property name="scaledContents">
+    <bool>false</bool>
+   </property>
+  </widget>
+  <widget class="MplWidget" name="mplEduHist" native="true">
+   <property name="geometry">
+    <rect>
+     <x>0</x>
+     <y>290</y>
+     <width>290</width>
+     <height>190</height>
+    </rect>
+   </property>
+  </widget>
+  <widget class="QLabel" name="lblId">
+   <property name="geometry">
+    <rect>
+     <x>310</x>
+     <y>350</y>
+     <width>59</width>
+     <height>16</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>TextLabel</string>
+   </property>
+  </widget>
+  <widget class="QLabel" name="imgEdu">
+   <property name="geometry">
+    <rect>
+     <x>310</x>
+     <y>280</y>
+     <width>64</width>
+     <height>64</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>TextLabel</string>
+   </property>
+   <property name="scaledContents">
+    <bool>false</bool>
+   </property>
+  </widget>
+ </widget>
+ <customwidgets>
+  <customwidget>
+   <class>MplWidget</class>
+   <extends>QWidget</extends>
+   <header>gui_mplwidget</header>
+   <container>1</container>
+  </customwidget>
+ </customwidgets>
+ <resources/>
+ <connections/>
+</ui>
