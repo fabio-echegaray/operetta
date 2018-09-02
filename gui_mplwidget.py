@@ -6,7 +6,7 @@ from matplotlib.figure import Figure
 class MplCanvas(FigureCanvas):
     def __init__(self):
         self.fig = Figure(tight_layout=True)
-        self.ax = self.fig.add_subplot(111)
+        self.ax = self.fig.gca()
         FigureCanvas.__init__(self, self.fig)
         FigureCanvas.setSizePolicy(self,
                                    QSizePolicy.Expanding,

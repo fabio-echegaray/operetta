@@ -68,8 +68,8 @@
   <widget class="QLabel" name="lblId">
    <property name="geometry">
     <rect>
-     <x>310</x>
-     <y>350</y>
+     <x>0</x>
+     <y>260</y>
      <width>59</width>
      <height>16</height>
     </rect>
@@ -81,10 +81,10 @@
   <widget class="QLabel" name="imgEdu">
    <property name="geometry">
     <rect>
-     <x>310</x>
-     <y>280</y>
-     <width>64</width>
-     <height>64</height>
+     <x>290</x>
+     <y>290</y>
+     <width>128</width>
+     <height>128</height>
     </rect>
    </property>
    <property name="text">
@@ -92,6 +92,61 @@
    </property>
    <property name="scaledContents">
     <bool>false</bool>
+   </property>
+  </widget>
+  <widget class="QLabel" name="imgPericentrin">
+   <property name="geometry">
+    <rect>
+     <x>280</x>
+     <y>0</y>
+     <width>256</width>
+     <height>256</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>TextLabel</string>
+   </property>
+   <property name="scaledContents">
+    <bool>false</bool>
+   </property>
+  </widget>
+  <widget class="QLabel" name="lblEduMin">
+   <property name="geometry">
+    <rect>
+     <x>430</x>
+     <y>290</y>
+     <width>90</width>
+     <height>16</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>min</string>
+   </property>
+  </widget>
+  <widget class="QLabel" name="lblEduMax">
+   <property name="geometry">
+    <rect>
+     <x>430</x>
+     <y>310</y>
+     <width>90</width>
+     <height>16</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>max</string>
+   </property>
+  </widget>
+  <widget class="QLabel" name="lblEduAvg">
+   <property name="geometry">
+    <rect>
+     <x>430</x>
+     <y>330</y>
+     <width>90</width>
+     <height>16</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>mean</string>
    </property>
   </widget>
  </widget>
