@@ -6,7 +6,7 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>640</width>
+    <width>942</width>
     <height>480</height>
    </rect>
   </property>
@@ -59,9 +59,9 @@
    <property name="geometry">
     <rect>
      <x>0</x>
-     <y>290</y>
+     <y>269</y>
      <width>290</width>
-     <height>190</height>
+     <height>211</height>
     </rect>
    </property>
   </widget>
@@ -147,6 +147,87 @@
    </property>
    <property name="text">
     <string>mean</string>
+   </property>
+  </widget>
+  <widget class="QLabel" name="imgTubulin">
+   <property name="geometry">
+    <rect>
+     <x>560</x>
+     <y>0</y>
+     <width>256</width>
+     <height>256</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>TextLabel</string>
+   </property>
+   <property name="scaledContents">
+    <bool>false</bool>
+   </property>
+  </widget>
+  <widget class="QLabel" name="lblEdu">
+   <property name="geometry">
+    <rect>
+     <x>430</x>
+     <y>270</y>
+     <width>90</width>
+     <height>16</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>Edu levels</string>
+   </property>
+  </widget>
+  <widget class="QLabel" name="lblTubAvg">
+   <property name="geometry">
+    <rect>
+     <x>560</x>
+     <y>330</y>
+     <width>90</width>
+     <height>16</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>mean</string>
+   </property>
+  </widget>
+  <widget class="QLabel" name="lblTub">
+   <property name="geometry">
+    <rect>
+     <x>560</x>
+     <y>270</y>
+     <width>90</width>
+     <height>16</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>Tubulin levels</string>
+   </property>
+  </widget>
+  <widget class="QLabel" name="lblTubMax">
+   <property name="geometry">
+    <rect>
+     <x>560</x>
+     <y>310</y>
+     <width>90</width>
+     <height>16</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>max</string>
+   </property>
+  </widget>
+  <widget class="QLabel" name="lblTubMin">
+   <property name="geometry">
+    <rect>
+     <x>560</x>
+     <y>290</y>
+     <width>90</width>
+     <height>16</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>min</string>
    </property>
   </widget>
  </widget>

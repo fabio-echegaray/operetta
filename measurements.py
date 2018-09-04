@@ -1,18 +1,61 @@
 import logging
+import math
 import os
 from math import sqrt
 
+import cv2
 import matplotlib.pyplot as plt
 import numpy as np
 import skimage.color as color
+import skimage.exposure as exposure
 import skimage.feature as feature
 import skimage.filters as filters
 import skimage.measure as measure
 import skimage.morphology as morphology
 import skimage.segmentation as segmentation
+from scipy import ndimage as ndi
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger('hhlab')
+
+
+def eng_string(x, format='%s', si=False):
+    '''
+    Returns float/int value <x> formatted in a simplified engineering format -
+    using an exponent that is a multiple of 3.
+
+    format: printf-style string used to format the value before the exponent.
+
+    si: if true, use SI suffix for exponent, e.g. k instead of e3, n instead of
+    e-9 etc.
+
+    E.g. with format='%.2f':
+        1.23e-08 => 12.30e-9
+             123 => 123.00
+          1230.0 => 1.23e3
+      -1230000.0 => -1.23e6
+
+    and with si=True:
+          1230.0 => 1.23k
+      -1230000.0 => -1.23M
+    '''
+    sign = ''
+    if x == 0: return ('%s' + format) % (sign, 0)
+    if x < 0:
+        x = -x
+        sign = '-'
+    exp = int(math.floor(math.log10(x)))
+    exp3 = exp - (exp % 3)
+    x3 = x / (10 ** exp3)
+
+    if si and exp3 >= -24 and exp3 <= 24 and exp3 != 0:
+        exp3_text = 'yzafpnum kMGTPEZY'[int((exp3 - (-24)) / 3)]
+    elif exp3 == 0:
+        exp3_text = ''
+    else:
+        exp3_text = 'e%s' % exp3
+
+    return ('%s' + format + '%s') % (sign, x3, exp3_text)
 
 
 def nuclei_segmentation(image, ax=None):
@@ -89,3 +132,72 @@ def centrosomes(image, ax=None, max_sigma=1):
     blobs_log[:, 2] = blobs_log[:, 2] * sqrt(2)
 
     return blobs_log
+
+
+def cell_boundary(tubulin, hoechst, ax=None, threshold=80, markers=None):
+    def build_gabor_filters():
+        filters = []
+        ksize = 9
+        for theta in np.arange(0, np.pi, np.pi / 8):
+            kern = cv2.getGaborKernel((ksize, ksize), 4.0, theta, 6.0, 0.5, 0, ktype=cv2.CV_32F)
+            kern /= kern.sum()
+            filters.append(kern)
+        return filters
+
+    def process_gabor(img, filters):
+        accum = np.zeros_like(img)
+        for kern in filters:
+            fimg = cv2.filter2D(img, cv2.CV_16UC1, kern)
+            np.maximum(accum, fimg, accum)
+        return accum
+
+    p2 = np.percentile(tubulin, 2)
+    p98 = np.percentile(tubulin, 98)
+    tubulin = exposure.rescale_intensity(tubulin, in_range=(p2, p98))
+    p2 = np.percentile(hoechst, 2)
+    p98 = np.percentile(hoechst, 98)
+    hoechst = exposure.rescale_intensity(hoechst, in_range=(p2, p98))
+
+    img = np.maximum(tubulin, 0.8 * hoechst)
+
+    img = morphology.erosion(img, morphology.square(3))
+    filters = build_gabor_filters()
+    gabor = process_gabor(img, filters)
+
+    gabor = cv2.convertScaleAbs(gabor, alpha=(255.0 / 65535.0))
+    ret, bin1 = cv2.threshold(gabor, threshold, 255, cv2.THRESH_BINARY)
+
+    # gaussian blur on gabor filter result
+    ksize = 31
+    blur = cv2.GaussianBlur(bin1, (ksize, ksize), 0)
+    ret, bin2 = cv2.threshold(blur, threshold, 255, cv2.THRESH_OTSU)
+    # ret, bin2 = cv2.threshold(blur, 70, 255, cv2.THRESH_BINARY)
+
+    if markers is None:
+        # get markers for watershed from hoescht channel
+        hoechst_8 = cv2.convertScaleAbs(hoechst, alpha=(255.0 / 65535.0))
+        blur_nuc = cv2.GaussianBlur(hoechst_8, (ksize, ksize), 0)
+        ret, bin_nuc = cv2.threshold(blur_nuc, 0, 255, cv2.THRESH_OTSU)
+        markers = ndi.label(bin_nuc)[0]
+
+    gabor_proc = gabor
+    labels = morphology.watershed(-gabor_proc, markers, mask=bin2)
+
+    boundaries_list = list()
+    # loop over the labels
+    for (i, l) in enumerate([l for l in np.unique(labels) if l > 0]):
+        # find contour of mask
+        cell_boundary = np.zeros(shape=labels.shape, dtype=np.uint8)
+        cell_boundary[labels == l] = 255
+        cnts = cv2.findContours(cell_boundary.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[-2]
+        contour = cnts[0]
+
+        M = cv2.moments(contour)
+        cx = int(M['m10'] / M['m00'])
+        cy = int(M['m01'] / M['m00'])
+        # cv2.circle(color, (cx, cy), 5, (0, 255, 0), thickness=-1)
+
+        boundary = np.array([[x, y] for x, y in [i[0] for i in contour]], dtype=np.float32)
+        boundaries_list.append({'id': l, 'boundary': boundary, 'centroid': (cx, cy)})
+
+    return boundaries_list, gabor_proc

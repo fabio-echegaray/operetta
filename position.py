@@ -4,16 +4,15 @@ import matplotlib
 import seaborn as sns
 import skimage
 import skimage.draw as draw
-import skimage.exposure as exposure
 from PyQt4 import QtCore, uic
 from PyQt4.QtCore import *
-from PyQt4.QtGui import *
+from PyQt4.QtGui import QApplication, QImage, QPixmap, QWidget
 from matplotlib.ticker import EngFormatter
 from skimage.io import imread
 
 from measurements import *
 
-matplotlib.use('TkAgg')
+matplotlib.use('Agg')
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger('hhlab')
@@ -58,7 +57,7 @@ class ExplorationGui(QWidget):
         self.pericentrin = imread(pfname)
         self.tubulin = imread(tfname)
 
-        self.pericentrin = exposure.equalize_adapthist(self.pericentrin)
+        self.pericentrin = exposure.equalize_adapthist(self.pericentrin, clip_limit=0.02)
 
         self.hoechst_show = color.gray2rgb(self.hoechst)
         self.edu_show = color.gray2rgb(self.edu)
@@ -85,48 +84,75 @@ class ExplorationGui(QWidget):
         c = contour[:, 1].astype(np.uint16)
         logger.debug('feat id: %d' % feat['id'])
 
-        rr, cc = draw.polygon(r, c)
         ravg, cavg = r.mean(), c.mean()
         dr, dc = int(ravg - self.imgCell.height() * 0.5), int(cavg - self.imgCell.width() * 0.5)
+        if dr < 0 or dc < 0:
+            logger.warning('nucleus in the edge of the frame')
+            # return
 
+        r_n, c_n = draw.polygon(r, c)
         # get images for rendering features
         _, (minr, maxr, minc, maxc) = qimage_crop(self.pericentrin_show, self.imgPericentrin, ravg, cavg)
         qimg_edu, _ = qimage_crop(self.edu_show, self.imgEdu, ravg, cavg)
-        pcens = skimage.img_as_ubyte(self.pericentrin_show[minr:maxr, minc:maxc].copy())
+        # qimg_tubulin, _ = qimage_crop(self.tubulin_show, self.imgTubulin, ravg, cavg)
+        peric_render = skimage.img_as_ubyte(self.pericentrin_show[minr:maxr, minc:maxc].copy())
         pcen = self.pericentrin[minr:maxr, minc:maxc]
+        ptub = self.tubulin[minr:maxr, minc:maxc]
+        phoec = self.hoechst[minr:maxr, minc:maxc]
+
+        tubulin_render = skimage.img_as_ubyte(self.tubulin_show[minr:maxr, minc:maxc].copy())
+        # tubulin_render[:, :, 0] = 0
+        # tubulin_render[:, :, 2] = 0
+
+        hoechst_render = self.hoechst_show.copy()
+        hoechst_render[:, :, 0] = 0
 
         centrs = centrosomes(pcen, max_sigma=self.resolution * 1.5)
         # centrs = [c for c in self.centrosomes if ((minr <= c[1] <= maxr) and ((minc <= c[0] <= maxc)))]
+        cell_bounds, gabor = cell_boundary(ptub, phoec)
+        logger.debug('cell_bounds ' + str(cell_bounds))
 
-        tdrw = self.hoechst_show.copy()
-        tdrw[:, :, 0] = 0
         try:
-            draw.set_color(tdrw, (r, c), color_red, alpha=1)
-            draw.set_color(pcens, (r - dr, c - dc), color_red, alpha=1)
+            draw.set_color(hoechst_render, (r, c), color_red, alpha=1)
+            draw.set_color(peric_render, (r - dr, c - dc), color_red, alpha=1)
+            draw.set_color(tubulin_render, (r - dr, c - dc), color_red, alpha=1)
         except:
             pass
-        qimg_hoechst, _ = qimage_crop(tdrw, self.imgCell, ravg, cavg)
 
         for centr in centrs:
             y, x, r = centr.astype(np.uint16)
             rcir, ccir = draw.circle_perimeter(y, x, 4)
-            draw.set_color(pcens, (rcir, ccir), color_yellow, alpha=1)
-        ql = self.imgPericentrin
-        qimg_peri = QImage(pcens.flatten(), ql.width(), ql.height(), QImage.Format_RGB888)
+            draw.set_color(peric_render, (rcir, ccir), color_yellow, alpha=1)
+            draw.set_color(tubulin_render, (rcir, ccir), color_yellow, alpha=1)
 
+
+        for b in cell_bounds:
+            bnd = b['boundary'].astype(np.uint16)
+            r_c, c_c = draw.polygon_perimeter(bnd[:, 1], bnd[:, 0])
+            draw.set_color(peric_render, (r_c, c_c), color_green, alpha=1)
+            draw.set_color(tubulin_render, (r_c, c_c), color_green, alpha=1)
+
+        ql = self.imgPericentrin
+        qimg_hoechst, _ = qimage_crop(hoechst_render, self.imgCell, ravg, cavg)
+        qimg_peri = QImage(peric_render.flatten(), ql.width(), ql.height(), QImage.Format_RGB888)
+        qimg_tubulin = QImage(tubulin_render.flatten(), ql.width(), ql.height(), QImage.Format_RGB888)
         self.imgEdu.setPixmap(QPixmap.fromImage(qimg_edu))
         self.imgCell.setPixmap(QPixmap.fromImage(qimg_hoechst))
         self.imgPericentrin.setPixmap(QPixmap.fromImage(qimg_peri))
+        self.imgTubulin.setPixmap(QPixmap.fromImage(qimg_tubulin))
 
         self.mplEduHist.clear()
-        sns.distplot(self.edu[rr, cc], kde=False, rug=True, ax=self.mplEduHist.canvas.ax)
+        sns.distplot(self.edu[r_n, c_n], kde=False, rug=True, ax=self.mplEduHist.canvas.ax)
         self.mplEduHist.canvas.ax.xaxis.set_major_formatter(EngFormatter())
         self.mplEduHist.canvas.ax.set_xlim([0, 2 ** 16])
         self.mplEduHist.canvas.draw()
 
-        self.lblEduMin.setText('min %0.1f' % self.edu[rr, cc].min())
-        self.lblEduMax.setText('max %0.1f' % self.edu[rr, cc].max())
-        self.lblEduAvg.setText('avg %0.1f' % self.edu[rr, cc].mean())
+        self.lblEduMin.setText('min ' + eng_string(self.edu[r_n, c_n].min(), format='%0.1f', si=True))
+        self.lblEduMax.setText('max ' + eng_string(self.edu[r_n, c_n].max(), format='%0.1f', si=True))
+        self.lblEduAvg.setText('avg ' + eng_string(self.edu[r_n, c_n].mean(), format='%0.1f', si=True))
+        self.lblTubMin.setText('min ' + eng_string(self.tubulin[r_n, c_n].min(), format='%0.1f', si=True))
+        self.lblTubMax.setText('max ' + eng_string(self.tubulin[r_n, c_n].max(), format='%0.1f', si=True))
+        self.lblTubAvg.setText('avg ' + eng_string(self.tubulin[r_n, c_n].mean(), format='%0.1f', si=True))
         self.lblId.setText('id %d' % feat['id'])
         self.update()
 
