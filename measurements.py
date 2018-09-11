@@ -6,6 +6,7 @@ from math import sqrt
 import cv2
 import matplotlib.pyplot as plt
 import numpy as np
+import scipy.ndimage as ndi
 import skimage.color as color
 import skimage.exposure as exposure
 import skimage.feature as feature
@@ -13,7 +14,9 @@ import skimage.filters as filters
 import skimage.measure as measure
 import skimage.morphology as morphology
 import skimage.segmentation as segmentation
-from scipy import ndimage as ndi
+import skimage.transform as tf
+from shapely.geometry import Point
+from shapely.geometry.polygon import Polygon
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger('hhlab')
@@ -109,15 +112,16 @@ def nuclei_features(image, ax=None, area_thresh=100):
 
     # Display the image and plot all contours found
     contours = measure.find_contours(image, 0.9)
+    tform = tf.SimilarityTransform(rotation=math.pi / 2)
 
     _list = list()
     for k, contr in enumerate(contours):
         if polygon_area(contr[:, 0], contr[:, 1]) > area_thresh:
-            # contr[:, 0] = -contr[:, 0] + image.shape[1]
+            contr = tform(contr)
+            contr[:, 0] *= -1
             _list.append({
                 'id': k,
-                # 'properties': region,
-                'contour': contr
+                'boundary': contr
             })
             if ax is not None:
                 ax.plot(contr[:, 1], contr[:, 0], linewidth=1)
@@ -130,6 +134,9 @@ def centrosomes(image, ax=None, max_sigma=1):
     logger.debug(blobs_log)
     # Compute radii in the 3rd column.
     blobs_log[:, 2] = blobs_log[:, 2] * sqrt(2)
+    tform = tf.SimilarityTransform(rotation=math.pi / 2)
+    blobs_log[:,0:2] = tform(blobs_log[:,0:2])
+    blobs_log[:, 0] *= -1
 
     return blobs_log
 
@@ -192,12 +199,33 @@ def cell_boundary(tubulin, hoechst, ax=None, threshold=80, markers=None):
         cnts = cv2.findContours(cell_boundary.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[-2]
         contour = cnts[0]
 
-        M = cv2.moments(contour)
-        cx = int(M['m10'] / M['m00'])
-        cy = int(M['m01'] / M['m00'])
-        # cv2.circle(color, (cx, cy), 5, (0, 255, 0), thickness=-1)
-
         boundary = np.array([[x, y] for x, y in [i[0] for i in contour]], dtype=np.float32)
-        boundaries_list.append({'id': l, 'boundary': boundary, 'centroid': (cx, cy)})
+        boundaries_list.append({'id': l, 'boundary': boundary})
 
     return boundaries_list, gabor_proc
+
+
+def is_measurement_valid(img, nuclei, cell_list, centrosome_list):
+    # check that neither nucleus or cell boundary touch the ends of the frame
+    maxw, maxh = img.shape
+    frame = Polygon([(0, 0), (0, maxw), (maxh, maxw), (maxh, 0)])
+    nuc = Polygon(nuclei)
+    for cll in cell_list:
+        cell = Polygon(cll['boundary'])
+        if cell.contains(nuc):
+            break
+    if not frame.contains(cell) or not cell.contains(nuc):
+        return False, None, nuc, None
+
+    # make sure that there's only one nucleus inside cell
+
+    # make sure that there's at least one centrosome, but no more than two
+    clist = list()
+    for cen in centrosome_list:
+        cenpt = Point(cen)
+        if cell.contains(cenpt):
+            clist.append(cenpt)
+    if len(clist) == 0 or len(clist) > 2:
+        return False, None, nuc, None
+
+    return True, cell, nuc, clist

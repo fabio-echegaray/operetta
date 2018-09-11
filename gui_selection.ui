@@ -6,7 +6,7 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>942</width>
+    <width>866</width>
     <height>480</height>
    </rect>
   </property>
@@ -113,8 +113,8 @@
   <widget class="QLabel" name="lblEduMin">
    <property name="geometry">
     <rect>
-     <x>430</x>
-     <y>290</y>
+     <x>290</x>
+     <y>360</y>
      <width>90</width>
      <height>16</height>
     </rect>
@@ -126,8 +126,8 @@
   <widget class="QLabel" name="lblEduMax">
    <property name="geometry">
     <rect>
-     <x>430</x>
-     <y>310</y>
+     <x>290</x>
+     <y>380</y>
      <width>90</width>
      <height>16</height>
     </rect>
@@ -139,8 +139,8 @@
   <widget class="QLabel" name="lblEduAvg">
    <property name="geometry">
     <rect>
-     <x>430</x>
-     <y>330</y>
+     <x>290</x>
+     <y>400</y>
      <width>90</width>
      <height>16</height>
     </rect>
@@ -168,7 +168,7 @@
   <widget class="QLabel" name="lblEdu">
    <property name="geometry">
     <rect>
-     <x>430</x>
+     <x>290</x>
      <y>270</y>
      <width>90</width>
      <height>16</height>
@@ -182,7 +182,7 @@
    <property name="geometry">
     <rect>
      <x>560</x>
-     <y>330</y>
+     <y>240</y>
      <width>90</width>
      <height>16</height>
     </rect>
@@ -194,8 +194,8 @@
   <widget class="QLabel" name="lblTub">
    <property name="geometry">
     <rect>
-     <x>560</x>
-     <y>270</y>
+     <x>550</x>
+     <y>260</y>
      <width>90</width>
      <height>16</height>
     </rect>
@@ -208,7 +208,7 @@
    <property name="geometry">
     <rect>
      <x>560</x>
-     <y>310</y>
+     <y>220</y>
      <width>90</width>
      <height>16</height>
     </rect>
@@ -221,13 +221,52 @@
    <property name="geometry">
     <rect>
      <x>560</x>
-     <y>290</y>
+     <y>200</y>
      <width>90</width>
      <height>16</height>
     </rect>
    </property>
    <property name="text">
     <string>min</string>
+   </property>
+  </widget>
+  <widget class="QPushButton" name="plotButton">
+   <property name="geometry">
+    <rect>
+     <x>730</x>
+     <y>440</y>
+     <width>113</width>
+     <height>32</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>plot</string>
+   </property>
+  </widget>
+  <widget class="QLabel" name="lblSampleOK">
+   <property name="geometry">
+    <rect>
+     <x>660</x>
+     <y>270</y>
+     <width>90</width>
+     <height>16</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>Is sample ok?</string>
+   </property>
+  </widget>
+  <widget class="QLabel" name="lblOK">
+   <property name="geometry">
+    <rect>
+     <x>660</x>
+     <y>290</y>
+     <width>90</width>
+     <height>16</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>ok/nok</string>
    </property>
   </widget>
  </widget>

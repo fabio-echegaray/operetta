@@ -1,18 +1,17 @@
 import sys
 
-import matplotlib
+import pandas as pd
 import seaborn as sns
-import skimage
 import skimage.draw as draw
 from PyQt4 import QtCore, uic
 from PyQt4.QtCore import *
 from PyQt4.QtGui import QApplication, QImage, QPixmap, QWidget
+from matplotlib.backends.backend_qt4agg import (FigureCanvas)
+from matplotlib.figure import Figure, SubplotParams
 from matplotlib.ticker import EngFormatter
 from skimage.io import imread
 
 from measurements import *
-
-matplotlib.use('Agg')
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger('hhlab')
@@ -23,8 +22,8 @@ color_blue = (0, 0, 65535)
 color_yellow = (65535, 65535, 0)
 
 
-def qimage_crop(image, qlabel, r, c):
-    maxw, maxh, chan = image.shape
+def get_crop_bbox(image, qlabel, r, c):
+    maxw, maxh = image.shape
     minr = int(r - qlabel.height() / 2.0)
     maxr = int(r + qlabel.height() / 2.0)
     minc = int(c - qlabel.width() / 2.0)
@@ -33,13 +32,18 @@ def qimage_crop(image, qlabel, r, c):
     minc = minc if minc > 0 else 0
     maxr = maxr if maxr < maxw else maxw
     maxc = maxc if maxc < maxh else maxh
-    logger.debug((minr, maxr, minc, maxc))
+    if maxr - minr < qlabel.height():
+        if minr == 0:
+            maxr = qlabel.height()
+        else:
+            minr = maxr - qlabel.height()
+    if maxc - minc < qlabel.width():
+        if minc == 0:
+            maxc = qlabel.width()
+        else:
+            minc = maxc - qlabel.width()
 
-    data = skimage.img_as_ubyte(image[minr:maxr, minc:maxc].copy())
-    # img = ((data - data.min()) / (data.ptp() / 255.0)).astype(np.uint8).repeat(3)
-    qtimage = QImage(data.flatten(), qlabel.width(), qlabel.height(), QImage.Format_RGB888)
-
-    return qtimage, (minr, maxr, minc, maxc)
+    return minr, maxr, minc, maxc
 
 
 class ExplorationGui(QWidget):
@@ -57,89 +61,80 @@ class ExplorationGui(QWidget):
         self.pericentrin = imread(pfname)
         self.tubulin = imread(tfname)
 
-        self.pericentrin = exposure.equalize_adapthist(self.pericentrin, clip_limit=0.02)
+        self.pericentrin = exposure.equalize_adapthist(self.pericentrin, clip_limit=0.03)
 
-        self.hoechst_show = color.gray2rgb(self.hoechst)
-        self.edu_show = color.gray2rgb(self.edu)
-        self.pericentrin_show = color.gray2rgb(self.pericentrin)
-        self.tubulin_show = color.gray2rgb(self.tubulin)
+        filename = 'out/nuclei.npy'
+        if os.path.exists(filename):
+            logger.info('reading nuclei file data')
+            self.nuclei_features = np.load(filename)
+        else:
+            logger.info('applying nuclei algorithm')
+            r = 6  # [um]
+            imgseg, radii = nuclei_segmentation(self.hoechst)
+            self.nuclei_features = nuclei_features(imgseg, area_thresh=(r * self.resolution) ** 2 * np.pi)
+            np.save(filename, self.nuclei_features)
 
-        r = 6  # [um]
-        imgseg, radii = nuclei_segmentation(self.hoechst)
-        self.nuclei_features = nuclei_features(imgseg, area_thresh=(r * self.resolution) ** 2 * np.pi)
-        # self.centrosomes = centrosomes(imgseg, max_sigma=self.resolution * 1.5)
+        filename = 'out/centrosomes.npy'
+        if os.path.exists(filename):
+            logger.info('reading centrosome file data')
+            self.centrosomes = np.load(filename)
+        else:
+            logger.info('applying centrosome algorithm')
+            self.centrosomes = centrosomes(self.pericentrin, max_sigma=self.resolution * 1.5)
+            np.save(filename, self.centrosomes)
+
+        filename = 'out/cells.npy'
+        if os.path.exists(filename):
+            logger.info('reading cell boundary file data')
+            self.cells = np.load(filename)
+        else:
+            logger.info('applying cell boundary algorithm')
+            self.cells, _ = cell_boundary(self.tubulin, self.hoechst)
+            np.save(filename, self.cells)
 
         self.render_cell()
 
+        for l in [self.lblEduMin, self.lblEduMax, self.lblEduAvg, self.lblTubMin, self.lblTubMax, self.lblTubAvg]:
+            l.setStyleSheet('color: grey')
+
         self.prevButton.pressed.connect(self.on_prev_button)
         self.nextButton.pressed.connect(self.on_next_button)
+        self.plotButton.pressed.connect(self.plot_everything_debug)
+
+    def build_df(self):
+        self.df = pd.DataFrame()
+        for nuc in self.nuclei_features:
+            valid, cell, nuclei, cntrsmes = is_measurement_valid(self.hoechst, nuc, self.cells, self.centrosomes)
+            c1 = cntrsmes[0]
+            c2 = cntrsmes[1] if len(cntrsmes) == 2 else None
+            if valid:
+                nuc_bnd = nuc['boundary'].astype(np.uint16)
+                r_n, c_n = draw.polygon(nuc_bnd[:, 0], nuc_bnd[:, 1])
+
+                d = pd.DataFrame(data={'id_n': nuc['id'],
+                                       'edu_avg': self.edu[r_n, c_n].mean(),
+                                       'edu_max': self.edu[r_n, c_n].max(),
+                                       'c1_d_nuc_centr': nuclei.centroid.distance(c1),
+                                       'c2_d_nuc_centr': nuclei.centroid.distance(c2),
+                                       'c1_d_nuc_bound': nuclei.distance(c1),
+                                       'c2_d_nuc_bound': nuclei.distance(c2),
+                                       'c1_d_cell_centr': cell.centroid.distance(c1),
+                                       'c2_d_cell_centr': cell.centroid.distance(c2),
+                                       })
+                self.df = self.df.append(d, ignore_index=True)
 
     def render_cell(self):
         logger.info('render_cell')
         logger.debug('self.current_nuclei_id: %d' % self.current_nuclei_id)
 
-        feat = self.nuclei_features[self.current_nuclei_id]
-        contour = feat['contour']
-        r = contour[:, 0].astype(np.uint16)
-        c = contour[:, 1].astype(np.uint16)
-        logger.debug('feat id: %d' % feat['id'])
-
-        ravg, cavg = r.mean(), c.mean()
-        dr, dc = int(ravg - self.imgCell.height() * 0.5), int(cavg - self.imgCell.width() * 0.5)
-        if dr < 0 or dc < 0:
-            logger.warning('nucleus in the edge of the frame')
-            # return
-
+        nuc_f = self.nuclei_features[self.current_nuclei_id]
+        nuc_bnd = nuc_f['boundary'].astype(np.uint16)
+        nb = Polygon(nuc_bnd)
+        c, r = nuc_bnd[:, 0], nuc_bnd[:, 1]
         r_n, c_n = draw.polygon(r, c)
-        # get images for rendering features
-        _, (minr, maxr, minc, maxc) = qimage_crop(self.pericentrin_show, self.imgPericentrin, ravg, cavg)
-        qimg_edu, _ = qimage_crop(self.edu_show, self.imgEdu, ravg, cavg)
-        # qimg_tubulin, _ = qimage_crop(self.tubulin_show, self.imgTubulin, ravg, cavg)
-        peric_render = skimage.img_as_ubyte(self.pericentrin_show[minr:maxr, minc:maxc].copy())
-        pcen = self.pericentrin[minr:maxr, minc:maxc]
-        ptub = self.tubulin[minr:maxr, minc:maxc]
-        phoec = self.hoechst[minr:maxr, minc:maxc]
+        logger.debug('feat id: %d' % nuc_f['id'])
 
-        tubulin_render = skimage.img_as_ubyte(self.tubulin_show[minr:maxr, minc:maxc].copy())
-        # tubulin_render[:, :, 0] = 0
-        # tubulin_render[:, :, 2] = 0
-
-        hoechst_render = self.hoechst_show.copy()
-        hoechst_render[:, :, 0] = 0
-
-        centrs = centrosomes(pcen, max_sigma=self.resolution * 1.5)
-        # centrs = [c for c in self.centrosomes if ((minr <= c[1] <= maxr) and ((minc <= c[0] <= maxc)))]
-        cell_bounds, gabor = cell_boundary(ptub, phoec)
-        logger.debug('cell_bounds ' + str(cell_bounds))
-
-        try:
-            draw.set_color(hoechst_render, (r, c), color_red, alpha=1)
-            draw.set_color(peric_render, (r - dr, c - dc), color_red, alpha=1)
-            draw.set_color(tubulin_render, (r - dr, c - dc), color_red, alpha=1)
-        except:
-            pass
-
-        for centr in centrs:
-            y, x, r = centr.astype(np.uint16)
-            rcir, ccir = draw.circle_perimeter(y, x, 4)
-            draw.set_color(peric_render, (rcir, ccir), color_yellow, alpha=1)
-            draw.set_color(tubulin_render, (rcir, ccir), color_yellow, alpha=1)
-
-
-        for b in cell_bounds:
-            bnd = b['boundary'].astype(np.uint16)
-            r_c, c_c = draw.polygon_perimeter(bnd[:, 1], bnd[:, 0])
-            draw.set_color(peric_render, (r_c, c_c), color_green, alpha=1)
-            draw.set_color(tubulin_render, (r_c, c_c), color_green, alpha=1)
-
-        ql = self.imgPericentrin
-        qimg_hoechst, _ = qimage_crop(hoechst_render, self.imgCell, ravg, cavg)
-        qimg_peri = QImage(peric_render.flatten(), ql.width(), ql.height(), QImage.Format_RGB888)
-        qimg_tubulin = QImage(tubulin_render.flatten(), ql.width(), ql.height(), QImage.Format_RGB888)
-        self.imgEdu.setPixmap(QPixmap.fromImage(qimg_edu))
-        self.imgCell.setPixmap(QPixmap.fromImage(qimg_hoechst))
-        self.imgPericentrin.setPixmap(QPixmap.fromImage(qimg_peri))
-        self.imgTubulin.setPixmap(QPixmap.fromImage(qimg_tubulin))
+        cen = nb.centroid
 
         self.mplEduHist.clear()
         sns.distplot(self.edu[r_n, c_n], kde=False, rug=True, ax=self.mplEduHist.canvas.ax)
@@ -147,14 +142,112 @@ class ExplorationGui(QWidget):
         self.mplEduHist.canvas.ax.set_xlim([0, 2 ** 16])
         self.mplEduHist.canvas.draw()
 
+        valid, cell, nuclei, cntrsmes = is_measurement_valid(self.hoechst, nuc_bnd, self.cells, self.centrosomes)
+
+        # create a matplotlib axis and plot edu image
+        mydpi = 72
+        sp = SubplotParams(left=0., bottom=0., right=1., top=1.)
+        fig = Figure((self.imgEdu.width() / mydpi, self.imgEdu.height() / mydpi), subplotpars=sp, dpi=mydpi)
+        canvas = FigureCanvas(fig)
+        ax = fig.gca()
+        ax.set_aspect('equal')
+        ax.set_axis_off()
+
+        ax.plot(cen.x, cen.y, color='red', marker='+', linewidth=1, solid_capstyle='round', zorder=2)
+
+        x, y = nuclei.exterior.xy
+        ax.plot(x, y, color='red', linewidth=1, solid_capstyle='round', zorder=2)
+
+        size = canvas.size()
+        ax.set_xlim(cen.x - size.width() / 2, cen.x + size.width() / 2)
+        ax.set_ylim(cen.y - size.height() / 2, cen.y + size.height() / 2)
+        # plot edu + boundaries
+        ax.imshow(self.edu, cmap='gray')
+        canvas.draw()
+
+        qimg_edu = QImage(canvas.buffer_rgba(), size.width(), size.height(), QImage.Format_ARGB32)
+
+        # plot rest of features
+        fig = Figure((self.imgCell.width() / mydpi, self.imgCell.height() / mydpi), subplotpars=sp, dpi=mydpi)
+        canvas = FigureCanvas(fig)
+        ax = fig.gca()
+        ax.set_aspect('equal')
+        ax.set_axis_off()
+
+        x, y = nuclei.exterior.xy
+        ax.plot(x, y, color='red', linewidth=1, solid_capstyle='round', zorder=2)
+        ax.plot(cen.x, cen.y, color='red', marker='+', linewidth=1, solid_capstyle='round', zorder=2)
+
+        x, y = nuclei.exterior.xy
+        ax.plot(x, y, color='red', linewidth=1, solid_capstyle='round', zorder=2)
+
+        size = canvas.size()
+        ax.set_xlim(cen.x - size.width() / 2, cen.x + size.width() / 2)
+        ax.set_ylim(cen.y - size.height() / 2, cen.y + size.height() / 2)
+        # plot edu + boundaries
+        ax.imshow(self.edu, cmap='gray')
+        canvas.draw()
+
+        if cell is not None:
+            x, y = cell.exterior.xy
+            ax.plot(x, y, color='green', linewidth=1, solid_capstyle='round', zorder=1)
+
+        if cntrsmes is not None:
+            for cn in cntrsmes:
+                c = plt.Circle((cn.x, cn.y), facecolor='none', edgecolor='yellow', linewidth=1, zorder=5)
+                ax.add_artist(c)
+
+        size = canvas.size()
+        ax.set_xlim(cen.x - size.width() / 2, cen.x + size.width() / 2)
+        ax.set_ylim(cen.y - size.height() / 2, cen.y + size.height() / 2)
+        # plot hoechst + boundaries
+        ax.imshow(self.hoechst, cmap='gray')
+        canvas.draw()
+        qimg_hoechst = QImage(canvas.buffer_rgba(), size.width(), size.height(), QImage.Format_ARGB32)
+        # plot pericentrin + boundaries
+        ax.imshow(self.pericentrin, cmap='gray')
+        canvas.draw()
+        qimg_peri = QImage(canvas.buffer_rgba(), size.width(), size.height(), QImage.Format_ARGB32)
+        # plot tubulin + boundaries
+        ax.imshow(self.tubulin, cmap='gray')
+        canvas.draw()
+        qimg_tubulin = QImage(canvas.buffer_rgba(), size.width(), size.height(), QImage.Format_ARGB32)
+
+        self.imgEdu.setPixmap(QPixmap.fromImage(qimg_edu))
+        self.imgCell.setPixmap(QPixmap.fromImage(qimg_hoechst))
+        self.imgPericentrin.setPixmap(QPixmap.fromImage(qimg_peri))
+        self.imgTubulin.setPixmap(QPixmap.fromImage(qimg_tubulin))
+
         self.lblEduMin.setText('min ' + eng_string(self.edu[r_n, c_n].min(), format='%0.1f', si=True))
         self.lblEduMax.setText('max ' + eng_string(self.edu[r_n, c_n].max(), format='%0.1f', si=True))
         self.lblEduAvg.setText('avg ' + eng_string(self.edu[r_n, c_n].mean(), format='%0.1f', si=True))
         self.lblTubMin.setText('min ' + eng_string(self.tubulin[r_n, c_n].min(), format='%0.1f', si=True))
         self.lblTubMax.setText('max ' + eng_string(self.tubulin[r_n, c_n].max(), format='%0.1f', si=True))
         self.lblTubAvg.setText('avg ' + eng_string(self.tubulin[r_n, c_n].mean(), format='%0.1f', si=True))
-        self.lblId.setText('id %d' % feat['id'])
+        self.lblId.setText('id %d' % nuc_f['id'])
+        self.lblOK.setText('OK' if valid else 'no OK')
         self.update()
+
+    @QtCore.pyqtSlot()
+    def plot_everything_debug(self):
+        f = plt.figure(20)
+        ax = f.gca()
+        ax.cla()
+        ax.set_aspect('equal')
+        # ax.imshow(self.hoechst)
+        ax.imshow(self.hoechst, origin='lower')
+        for nuc_feat in self.nuclei_features:
+            nuc_bnd = nuc_feat['boundary'].astype(np.uint16)
+            nuc = Polygon(nuc_bnd)
+            x, y = nuc.exterior.xy
+            ax.plot(x, y, color='red', linewidth=3, solid_capstyle='round', zorder=2)
+        for cll in self.cells:
+            cel = Polygon(cll['boundary'])
+            x, y = cel.exterior.xy
+            ax.plot(x, y, color='green', linewidth=3, solid_capstyle='round', zorder=1)
+        for cn in self.centrosomes:
+            c = plt.Circle((cn[0], cn[1]), facecolor='none', edgecolor='yellow', linewidth=3, zorder=5)
+            ax.add_artist(c)
 
     @QtCore.pyqtSlot()
     def on_prev_button(self):
