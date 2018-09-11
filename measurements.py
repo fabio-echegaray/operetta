@@ -135,7 +135,7 @@ def centrosomes(image, ax=None, max_sigma=1):
     # Compute radii in the 3rd column.
     blobs_log[:, 2] = blobs_log[:, 2] * sqrt(2)
     tform = tf.SimilarityTransform(rotation=math.pi / 2)
-    blobs_log[:,0:2] = tform(blobs_log[:,0:2])
+    blobs_log[:, 0:2] = tform(blobs_log[:, 0:2])
     blobs_log[:, 0] *= -1
 
     return blobs_log
@@ -205,7 +205,7 @@ def cell_boundary(tubulin, hoechst, ax=None, threshold=80, markers=None):
     return boundaries_list, gabor_proc
 
 
-def is_measurement_valid(img, nuclei, cell_list, centrosome_list):
+def get_nuclei_features(img, nuclei, cell_list, nuclei_list, centrosome_list):
     # check that neither nucleus or cell boundary touch the ends of the frame
     maxw, maxh = img.shape
     frame = Polygon([(0, 0), (0, maxw), (maxh, maxw), (maxh, 0)])
@@ -215,9 +215,16 @@ def is_measurement_valid(img, nuclei, cell_list, centrosome_list):
         if cell.contains(nuc):
             break
     if not frame.contains(cell) or not cell.contains(nuc):
-        return False, None, nuc, None
+        return False, cell, nuc, None
 
     # make sure that there's only one nucleus inside cell
+    n_nuc = 0
+    for ncl in nuclei_list:
+        nuclei = Polygon(ncl['boundary'])
+        if cell.contains(nuclei):
+            n_nuc += 1
+    if n_nuc != 1:
+        return False, cell, nuc, None
 
     # make sure that there's at least one centrosome, but no more than two
     clist = list()

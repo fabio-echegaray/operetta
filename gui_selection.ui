@@ -191,19 +191,6 @@
     <string>mean</string>
    </property>
   </widget>
-  <widget class="QLabel" name="lblTub">
-   <property name="geometry">
-    <rect>
-     <x>550</x>
-     <y>260</y>
-     <width>90</width>
-     <height>16</height>
-    </rect>
-   </property>
-   <property name="text">
-    <string>Tubulin levels</string>
-   </property>
-  </widget>
   <widget class="QLabel" name="lblTubMax">
    <property name="geometry">
     <rect>
@@ -267,6 +254,110 @@
    </property>
    <property name="text">
     <string>ok/nok</string>
+   </property>
+  </widget>
+  <widget class="QLabel" name="lblDist_nc">
+   <property name="geometry">
+    <rect>
+     <x>660</x>
+     <y>310</y>
+     <width>90</width>
+     <height>16</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>ok/nok</string>
+   </property>
+  </widget>
+  <widget class="QLabel" name="lblDist_nb">
+   <property name="geometry">
+    <rect>
+     <x>660</x>
+     <y>330</y>
+     <width>90</width>
+     <height>16</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>ok/nok</string>
+   </property>
+  </widget>
+  <widget class="QLabel" name="lblDist_cc">
+   <property name="geometry">
+    <rect>
+     <x>660</x>
+     <y>350</y>
+     <width>90</width>
+     <height>16</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>ok/nok</string>
+   </property>
+  </widget>
+  <widget class="QLabel" name="lblDist_cb">
+   <property name="geometry">
+    <rect>
+     <x>660</x>
+     <y>370</y>
+     <width>90</width>
+     <height>16</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>ok/nok</string>
+   </property>
+  </widget>
+  <widget class="QLabel" name="lblDist_nb_2">
+   <property name="geometry">
+    <rect>
+     <x>550</x>
+     <y>330</y>
+     <width>90</width>
+     <height>16</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>nucei boundary</string>
+   </property>
+  </widget>
+  <widget class="QLabel" name="lblDist_cb_2">
+   <property name="geometry">
+    <rect>
+     <x>550</x>
+     <y>370</y>
+     <width>90</width>
+     <height>16</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>cell boundary</string>
+   </property>
+  </widget>
+  <widget class="QLabel" name="lblDist_nc_2">
+   <property name="geometry">
+    <rect>
+     <x>550</x>
+     <y>310</y>
+     <width>90</width>
+     <height>20</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>nuclei centroid</string>
+   </property>
+  </widget>
+  <widget class="QLabel" name="lblDist_cc_2">
+   <property name="geometry">
+    <rect>
+     <x>550</x>
+     <y>350</y>
+     <width>90</width>
+     <height>16</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>cell centroid</string>
    </property>
   </widget>
  </widget>

@@ -50,6 +50,8 @@ class ExplorationGui(QWidget):
     def __init__(self, hfname, efname, pfname, tfname):
         QWidget.__init__(self)
         uic.loadUi('gui_selection.ui', self)
+        for l in [self.lblEduMin, self.lblEduMax, self.lblEduAvg, self.lblTubMin, self.lblTubMax, self.lblTubAvg]:
+            l.setStyleSheet('color: grey')
 
         self.current_nuclei_id = 0
         self.centrosome_dropped = False
@@ -92,11 +94,9 @@ class ExplorationGui(QWidget):
             self.cells, _ = cell_boundary(self.tubulin, self.hoechst)
             np.save(filename, self.cells)
 
+        self.build_df()
+
         self.render_cell()
-
-        for l in [self.lblEduMin, self.lblEduMax, self.lblEduAvg, self.lblTubMin, self.lblTubMax, self.lblTubAvg]:
-            l.setStyleSheet('color: grey')
-
         self.prevButton.pressed.connect(self.on_prev_button)
         self.nextButton.pressed.connect(self.on_next_button)
         self.plotButton.pressed.connect(self.plot_everything_debug)
@@ -104,22 +104,27 @@ class ExplorationGui(QWidget):
     def build_df(self):
         self.df = pd.DataFrame()
         for nuc in self.nuclei_features:
-            valid, cell, nuclei, cntrsmes = is_measurement_valid(self.hoechst, nuc, self.cells, self.centrosomes)
-            c1 = cntrsmes[0]
-            c2 = cntrsmes[1] if len(cntrsmes) == 2 else None
+            valid, cell, nuclei, cntrsmes = get_nuclei_features(self.hoechst, nuc['boundary'], self.cells,
+                                                                self.nuclei_features, self.centrosomes)
             if valid:
+                twocntr = len(cntrsmes) == 2
+                c1 = cntrsmes[0]
+                c2 = cntrsmes[1] if twocntr else None
                 nuc_bnd = nuc['boundary'].astype(np.uint16)
-                r_n, c_n = draw.polygon(nuc_bnd[:, 0], nuc_bnd[:, 1])
+                c, r = nuc_bnd[:, 0], nuc_bnd[:, 1]
+                r_n, c_n = draw.polygon(r, c)
 
-                d = pd.DataFrame(data={'id_n': nuc['id'],
-                                       'edu_avg': self.edu[r_n, c_n].mean(),
-                                       'edu_max': self.edu[r_n, c_n].max(),
-                                       'c1_d_nuc_centr': nuclei.centroid.distance(c1),
-                                       'c2_d_nuc_centr': nuclei.centroid.distance(c2),
-                                       'c1_d_nuc_bound': nuclei.distance(c1),
-                                       'c2_d_nuc_bound': nuclei.distance(c2),
-                                       'c1_d_cell_centr': cell.centroid.distance(c1),
-                                       'c2_d_cell_centr': cell.centroid.distance(c2),
+                d = pd.DataFrame(data={'id_n': [nuc['id']],
+                                       'edu_avg': [self.edu[r_n, c_n].mean()],
+                                       'edu_max': [self.edu[r_n, c_n].max()],
+                                       'c1_d_nuc_centr': [nuclei.centroid.distance(c1)],
+                                       'c2_d_nuc_centr': [nuclei.centroid.distance(c2) if twocntr else np.nan],
+                                       'c1_d_nuc_bound': [nuclei.exterior.distance(c1)],
+                                       'c2_d_nuc_bound': [nuclei.exterior.distance(c2) if twocntr else np.nan],
+                                       'c1_d_cell_centr': [cell.centroid.distance(c1)],
+                                       'c2_d_cell_centr': [cell.centroid.distance(c2) if twocntr else np.nan],
+                                       'c1_d_cell_bound': [cell.exterior.distance(c1)],
+                                       'c2_d_cell_bound': [cell.exterior.distance(c2) if twocntr else np.nan],
                                        })
                 self.df = self.df.append(d, ignore_index=True)
 
@@ -128,7 +133,7 @@ class ExplorationGui(QWidget):
         logger.debug('self.current_nuclei_id: %d' % self.current_nuclei_id)
 
         nuc_f = self.nuclei_features[self.current_nuclei_id]
-        nuc_bnd = nuc_f['boundary'].astype(np.uint16)
+        nuc_bnd = nuc_f['boundary']
         nb = Polygon(nuc_bnd)
         c, r = nuc_bnd[:, 0], nuc_bnd[:, 1]
         r_n, c_n = draw.polygon(r, c)
@@ -142,7 +147,8 @@ class ExplorationGui(QWidget):
         self.mplEduHist.canvas.ax.set_xlim([0, 2 ** 16])
         self.mplEduHist.canvas.draw()
 
-        valid, cell, nuclei, cntrsmes = is_measurement_valid(self.hoechst, nuc_bnd, self.cells, self.centrosomes)
+        valid, cell, nuclei, cntrsmes = get_nuclei_features(self.hoechst, nuc_bnd, self.cells, self.nuclei_features,
+                                                            self.centrosomes)
 
         # create a matplotlib axis and plot edu image
         mydpi = 72
@@ -226,18 +232,27 @@ class ExplorationGui(QWidget):
         self.lblTubAvg.setText('avg ' + eng_string(self.tubulin[r_n, c_n].mean(), format='%0.1f', si=True))
         self.lblId.setText('id %d' % nuc_f['id'])
         self.lblOK.setText('OK' if valid else 'no OK')
+        if valid:
+            c1 = cntrsmes[0]
+            self.lblDist_nc.setText('%0.2f' % nuclei.centroid.distance(c1))
+            self.lblDist_nb.setText('%0.2f' % nuclei.exterior.distance(c1))
+            self.lblDist_cc.setText('%0.2f' % cell.centroid.distance(c1))
+            self.lblDist_cb.setText('%0.2f' % cell.exterior.distance(c1))
+        else:
+            self.lblDist_nc.setText('-')
+            self.lblDist_nb.setText('-')
+            self.lblDist_cc.setText('-')
+            self.lblDist_cb.setText('-')
         self.update()
 
     @QtCore.pyqtSlot()
     def plot_everything_debug(self):
         f = plt.figure(20)
         ax = f.gca()
-        ax.cla()
         ax.set_aspect('equal')
-        # ax.imshow(self.hoechst)
         ax.imshow(self.hoechst, origin='lower')
         for nuc_feat in self.nuclei_features:
-            nuc_bnd = nuc_feat['boundary'].astype(np.uint16)
+            nuc_bnd = nuc_feat['boundary']
             nuc = Polygon(nuc_bnd)
             x, y = nuc.exterior.xy
             ax.plot(x, y, color='red', linewidth=3, solid_capstyle='round', zorder=2)
@@ -248,6 +263,18 @@ class ExplorationGui(QWidget):
         for cn in self.centrosomes:
             c = plt.Circle((cn[0], cn[1]), facecolor='none', edgecolor='yellow', linewidth=3, zorder=5)
             ax.add_artist(c)
+
+        f = plt.figure(30)
+        ax1 = f.add_subplot(211)
+        ax2 = f.add_subplot(212)
+        df = self.df.loc[:, ['edu_avg', 'c1_d_nuc_centr', 'c1_d_nuc_bound', 'c1_d_cell_centr', 'c1_d_cell_bound']]
+        df = df[df['edu_avg'] < 3000]
+        dd = pd.melt(df, id_vars=['edu_avg'])
+        sns.scatterplot(x='edu_avg', y='value', hue='variable', data=dd, ax=ax1)
+        sns.catplot(x='variable', y='value', data=dd, ax=ax2)
+        ax1.xaxis.set_major_formatter(EngFormatter())
+        ax1.set_ylabel('distance [um]')
+        ax2.set_ylabel('distance [um]')
 
     @QtCore.pyqtSlot()
     def on_prev_button(self):
