@@ -64,6 +64,65 @@
      <height>211</height>
     </rect>
    </property>
+   <widget class="QLabel" name="lblEduAvg">
+    <property name="geometry">
+     <rect>
+      <x>150</x>
+      <y>130</y>
+      <width>90</width>
+      <height>16</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>mean</string>
+    </property>
+   </widget>
+   <widget class="QLabel" name="lblEduMin">
+    <property name="geometry">
+     <rect>
+      <x>150</x>
+      <y>90</y>
+      <width>90</width>
+      <height>16</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>min</string>
+    </property>
+   </widget>
+   <widget class="QLabel" name="imgEdu">
+    <property name="geometry">
+     <rect>
+      <x>150</x>
+      <y>20</y>
+      <width>128</width>
+      <height>128</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>TextLabel</string>
+    </property>
+    <property name="scaledContents">
+     <bool>false</bool>
+    </property>
+   </widget>
+   <widget class="QLabel" name="lblEduMax">
+    <property name="geometry">
+     <rect>
+      <x>150</x>
+      <y>110</y>
+      <width>90</width>
+      <height>16</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>max</string>
+    </property>
+   </widget>
+   <zorder>imgEdu</zorder>
+   <zorder>lblEduAvg</zorder>
+   <zorder>lblEduMin</zorder>
+   <zorder>lblEduMax</zorder>
   </widget>
   <widget class="QLabel" name="lblId">
    <property name="geometry">
@@ -76,22 +135,6 @@
    </property>
    <property name="text">
     <string>TextLabel</string>
-   </property>
-  </widget>
-  <widget class="QLabel" name="imgEdu">
-   <property name="geometry">
-    <rect>
-     <x>290</x>
-     <y>290</y>
-     <width>128</width>
-     <height>128</height>
-    </rect>
-   </property>
-   <property name="text">
-    <string>TextLabel</string>
-   </property>
-   <property name="scaledContents">
-    <bool>false</bool>
    </property>
   </widget>
   <widget class="QLabel" name="imgPericentrin">
@@ -110,45 +153,6 @@
     <bool>false</bool>
    </property>
   </widget>
-  <widget class="QLabel" name="lblEduMin">
-   <property name="geometry">
-    <rect>
-     <x>290</x>
-     <y>360</y>
-     <width>90</width>
-     <height>16</height>
-    </rect>
-   </property>
-   <property name="text">
-    <string>min</string>
-   </property>
-  </widget>
-  <widget class="QLabel" name="lblEduMax">
-   <property name="geometry">
-    <rect>
-     <x>290</x>
-     <y>380</y>
-     <width>90</width>
-     <height>16</height>
-    </rect>
-   </property>
-   <property name="text">
-    <string>max</string>
-   </property>
-  </widget>
-  <widget class="QLabel" name="lblEduAvg">
-   <property name="geometry">
-    <rect>
-     <x>290</x>
-     <y>400</y>
-     <width>90</width>
-     <height>16</height>
-    </rect>
-   </property>
-   <property name="text">
-    <string>mean</string>
-   </property>
-  </widget>
   <widget class="QLabel" name="imgTubulin">
    <property name="geometry">
     <rect>
@@ -163,19 +167,6 @@
    </property>
    <property name="scaledContents">
     <bool>false</bool>
-   </property>
-  </widget>
-  <widget class="QLabel" name="lblEdu">
-   <property name="geometry">
-    <rect>
-     <x>290</x>
-     <y>270</y>
-     <width>90</width>
-     <height>16</height>
-    </rect>
-   </property>
-   <property name="text">
-    <string>Edu levels</string>
    </property>
   </widget>
   <widget class="QLabel" name="lblTubAvg">
@@ -246,8 +237,8 @@
   <widget class="QLabel" name="lblOK">
    <property name="geometry">
     <rect>
-     <x>660</x>
-     <y>290</y>
+     <x>750</x>
+     <y>270</y>
      <width>90</width>
      <height>16</height>
     </rect>
@@ -318,7 +309,7 @@
     </rect>
    </property>
    <property name="text">
-    <string>nucei boundary</string>
+    <string>nuclei boundary</string>
    </property>
   </widget>
   <widget class="QLabel" name="lblDist_cb_2">
@@ -360,6 +351,72 @@
     <string>cell centroid</string>
    </property>
   </widget>
+  <widget class="QLabel" name="imgCentrCloseup">
+   <property name="geometry">
+    <rect>
+     <x>290</x>
+     <y>290</y>
+     <width>128</width>
+     <height>128</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>TextLabel</string>
+   </property>
+   <property name="scaledContents">
+    <bool>false</bool>
+   </property>
+  </widget>
+  <widget class="QLabel" name="lblCentr_n_2">
+   <property name="geometry">
+    <rect>
+     <x>550</x>
+     <y>290</y>
+     <width>90</width>
+     <height>16</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>nº of centrosomes</string>
+   </property>
+  </widget>
+  <widget class="QLabel" name="lblCentr_n">
+   <property name="geometry">
+    <rect>
+     <x>660</x>
+     <y>290</y>
+     <width>90</width>
+     <height>16</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>0</string>
+   </property>
+  </widget>
+  <zorder>mplEduHist</zorder>
+  <zorder>prevButton</zorder>
+  <zorder>nextButton</zorder>
+  <zorder>imgCell</zorder>
+  <zorder>lblId</zorder>
+  <zorder>imgPericentrin</zorder>
+  <zorder>imgTubulin</zorder>
+  <zorder>lblTubAvg</zorder>
+  <zorder>lblTubMax</zorder>
+  <zorder>lblTubMin</zorder>
+  <zorder>plotButton</zorder>
+  <zorder>lblSampleOK</zorder>
+  <zorder>lblOK</zorder>
+  <zorder>lblDist_nc</zorder>
+  <zorder>lblDist_nb</zorder>
+  <zorder>lblDist_cc</zorder>
+  <zorder>lblDist_cb</zorder>
+  <zorder>lblDist_nb_2</zorder>
+  <zorder>lblDist_cb_2</zorder>
+  <zorder>lblDist_nc_2</zorder>
+  <zorder>lblDist_cc_2</zorder>
+  <zorder>imgCentrCloseup</zorder>
+  <zorder>lblCentr_n_2</zorder>
+  <zorder>lblCentr_n</zorder>
  </widget>
  <customwidgets>
   <customwidget>

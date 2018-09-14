@@ -165,7 +165,8 @@ def cell_boundary(tubulin, hoechst, ax=None, threshold=80, markers=None):
     p98 = np.percentile(hoechst, 98)
     hoechst = exposure.rescale_intensity(hoechst, in_range=(p2, p98))
 
-    img = np.maximum(tubulin, 0.8 * hoechst)
+    # img = np.maximum(tubulin, 0.8 * hoechst)
+    img = tubulin
 
     img = morphology.erosion(img, morphology.square(3))
     filters = build_gabor_filters()

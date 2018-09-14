@@ -3,9 +3,11 @@ import sys
 import pandas as pd
 import seaborn as sns
 import skimage.draw as draw
+from PIL import Image
+from PIL.ImageQt import ImageQt
 from PyQt4 import QtCore, uic
 from PyQt4.QtCore import *
-from PyQt4.QtGui import QApplication, QImage, QPixmap, QWidget
+from PyQt4.QtGui import QApplication, QPixmap, QWidget
 from matplotlib.backends.backend_qt4agg import (FigureCanvas)
 from matplotlib.figure import Figure, SubplotParams
 from matplotlib.ticker import EngFormatter
@@ -46,6 +48,14 @@ def get_crop_bbox(image, qlabel, r, c):
     return minr, maxr, minc, maxc
 
 
+def canvas_to_pil(canvas):
+    canvas.draw()
+    s = canvas.tostring_rgb()
+    w, h = canvas.get_width_height()[::-1]
+    im = Image.frombytes("RGB", (w, h), s)
+    return im
+
+
 class ExplorationGui(QWidget):
     def __init__(self, hfname, efname, pfname, tfname):
         QWidget.__init__(self)
@@ -82,7 +92,7 @@ class ExplorationGui(QWidget):
             self.centrosomes = np.load(filename)
         else:
             logger.info('applying centrosome algorithm')
-            self.centrosomes = centrosomes(self.pericentrin, max_sigma=self.resolution * 1.5)
+            self.centrosomes = centrosomes(self.pericentrin, max_sigma=self.resolution * 0.2)
             np.save(filename, self.centrosomes)
 
         filename = 'out/cells.npy'
@@ -115,8 +125,10 @@ class ExplorationGui(QWidget):
                 r_n, c_n = draw.polygon(r, c)
 
                 d = pd.DataFrame(data={'id_n': [nuc['id']],
+                                       'dna': [self.hoechst[r_n, c_n].mean() * nuclei.area],
                                        'edu_avg': [self.edu[r_n, c_n].mean()],
                                        'edu_max': [self.edu[r_n, c_n].max()],
+                                       'centrosomes': [len(cntrsmes)],
                                        'c1_d_nuc_centr': [nuclei.centroid.distance(c1)],
                                        'c2_d_nuc_centr': [nuclei.centroid.distance(c2) if twocntr else np.nan],
                                        'c1_d_nuc_bound': [nuclei.exterior.distance(c1)],
@@ -169,9 +181,8 @@ class ExplorationGui(QWidget):
         ax.set_ylim(cen.y - size.height() / 2, cen.y + size.height() / 2)
         # plot edu + boundaries
         ax.imshow(self.edu, cmap='gray')
-        canvas.draw()
 
-        qimg_edu = QImage(canvas.buffer_rgba(), size.width(), size.height(), QImage.Format_ARGB32)
+        qimg_edu = ImageQt(canvas_to_pil(canvas))
 
         # plot rest of features
         fig = Figure((self.imgCell.width() / mydpi, self.imgCell.height() / mydpi), subplotpars=sp, dpi=mydpi)
@@ -192,7 +203,6 @@ class ExplorationGui(QWidget):
         ax.set_ylim(cen.y - size.height() / 2, cen.y + size.height() / 2)
         # plot edu + boundaries
         ax.imshow(self.edu, cmap='gray')
-        canvas.draw()
 
         if cell is not None:
             x, y = cell.exterior.xy
@@ -208,16 +218,13 @@ class ExplorationGui(QWidget):
         ax.set_ylim(cen.y - size.height() / 2, cen.y + size.height() / 2)
         # plot hoechst + boundaries
         ax.imshow(self.hoechst, cmap='gray')
-        canvas.draw()
-        qimg_hoechst = QImage(canvas.buffer_rgba(), size.width(), size.height(), QImage.Format_ARGB32)
+        qimg_hoechst = ImageQt(canvas_to_pil(canvas))
         # plot pericentrin + boundaries
         ax.imshow(self.pericentrin, cmap='gray')
-        canvas.draw()
-        qimg_peri = QImage(canvas.buffer_rgba(), size.width(), size.height(), QImage.Format_ARGB32)
+        qimg_peri = ImageQt(canvas_to_pil(canvas))
         # plot tubulin + boundaries
         ax.imshow(self.tubulin, cmap='gray')
-        canvas.draw()
-        qimg_tubulin = QImage(canvas.buffer_rgba(), size.width(), size.height(), QImage.Format_ARGB32)
+        qimg_tubulin = ImageQt(canvas_to_pil(canvas))
 
         self.imgEdu.setPixmap(QPixmap.fromImage(qimg_edu))
         self.imgCell.setPixmap(QPixmap.fromImage(qimg_hoechst))
@@ -230,19 +237,45 @@ class ExplorationGui(QWidget):
         self.lblTubMin.setText('min ' + eng_string(self.tubulin[r_n, c_n].min(), format='%0.1f', si=True))
         self.lblTubMax.setText('max ' + eng_string(self.tubulin[r_n, c_n].max(), format='%0.1f', si=True))
         self.lblTubAvg.setText('avg ' + eng_string(self.tubulin[r_n, c_n].mean(), format='%0.1f', si=True))
+        self.lblCentr_n.setText('%d' % (len(cntrsmes) if cntrsmes is not None else 0))
         self.lblId.setText('id %d' % nuc_f['id'])
         self.lblOK.setText('OK' if valid else 'no OK')
+
+        fig = Figure((self.imgCentrCloseup.width() / mydpi, self.imgCentrCloseup.height() / mydpi), subplotpars=sp,
+                     dpi=mydpi)
+        canvas = FigureCanvas(fig)
+        ax = fig.gca()
+        ax.set_aspect('equal')
+        ax.set_axis_off()
         if valid:
             c1 = cntrsmes[0]
             self.lblDist_nc.setText('%0.2f' % nuclei.centroid.distance(c1))
             self.lblDist_nb.setText('%0.2f' % nuclei.exterior.distance(c1))
             self.lblDist_cc.setText('%0.2f' % cell.centroid.distance(c1))
             self.lblDist_cb.setText('%0.2f' % cell.exterior.distance(c1))
+
+            ax.imshow(self.pericentrin, cmap='gray')
+            for cn in cntrsmes:
+                c = plt.Circle((cn.x, cn.y), radius=10, facecolor='none', edgecolor='yellow',
+                               linestyle='--', linewidth=1, zorder=5)
+                ax.add_artist(c)
+
+            size = canvas.size()
+            c1 = cntrsmes[0]
+            ax.set_xlim(c1.x - size.width() / 8, c1.x + size.width() / 8)
+            ax.set_ylim(c1.y - size.height() / 8, c1.y + size.height() / 8)
+
+            qimg_closeup = ImageQt(canvas_to_pil(canvas))
+            self.imgCentrCloseup.setPixmap(QPixmap.fromImage(qimg_closeup))
         else:
             self.lblDist_nc.setText('-')
             self.lblDist_nb.setText('-')
             self.lblDist_cc.setText('-')
             self.lblDist_cb.setText('-')
+
+            size = canvas.size()
+            qimg_closeup = ImageQt(Image.new('RGB', (size.width(), size.height())))
+            self.imgCentrCloseup.setPixmap(QPixmap.fromImage(qimg_closeup))
         self.update()
 
     @QtCore.pyqtSlot()
@@ -267,11 +300,12 @@ class ExplorationGui(QWidget):
         f = plt.figure(30)
         ax1 = f.add_subplot(211)
         ax2 = f.add_subplot(212)
-        df = self.df.loc[:, ['edu_avg', 'c1_d_nuc_centr', 'c1_d_nuc_bound', 'c1_d_cell_centr', 'c1_d_cell_bound']]
-        df = df[df['edu_avg'] < 3000]
+        df = self.df
+        df = df.loc[:, ['edu_avg', 'c1_d_nuc_centr', 'c1_d_nuc_bound', 'c1_d_cell_centr', 'c1_d_cell_bound']]
         dd = pd.melt(df, id_vars=['edu_avg'])
         sns.scatterplot(x='edu_avg', y='value', hue='variable', data=dd, ax=ax1)
-        sns.catplot(x='variable', y='value', data=dd, ax=ax2)
+        sns.boxplot(x='variable', y='value', data=dd, ax=ax2)
+        sns.swarmplot(x='variable', y='value', data=dd, ax=ax2, color=".25")
         ax1.xaxis.set_major_formatter(EngFormatter())
         ax1.set_ylabel('distance [um]')
         ax2.set_ylabel('distance [um]')
@@ -290,8 +324,6 @@ class ExplorationGui(QWidget):
 
 
 if __name__ == '__main__':
-    b_path = '/Users/Fabio/data/20180817 U2OS cenpf peric edu formfix/'
-
     base_path = os.path.abspath('%s' % os.getcwd())
     logging.info('Qt version:' + QT_VERSION_STR)
     logging.info('PyQt version:' + PYQT_VERSION_STR)
@@ -301,11 +333,18 @@ if __name__ == '__main__':
 
     app = QApplication(sys.argv)
 
+    b_path = '/Users/Fabio/data/20180817 U2OS cenpf peric edu formfix/'
     gui = ExplorationGui(
         hfname=b_path + 'Capture 3 - Position 0 [64] Montage.Project Maximum Z_XY1534504412_Z0_T0_C0.tif',
         tfname=b_path + 'Capture 3 - Position 0 [64] Montage.Project Maximum Z_XY1534504412_Z0_T0_C1.tif',
         pfname=b_path + 'Capture 3 - Position 0 [64] Montage.Project Maximum Z_XY1534504412_Z0_T0_C2.tif',
         efname=b_path + 'Capture 3 - Position 0 [64] Montage.Project Maximum Z_XY1534504412_Z0_T0_C3.tif'
     )
-    gui.show()
-    sys.exit(app.exec_())
+
+    from pycallgraph import PyCallGraph
+    from pycallgraph.output import GraphvizOutput
+
+    with PyCallGraph(output=GraphvizOutput()):
+        gui.show()
+        code = app.exec_()
+    sys.exit(code)
