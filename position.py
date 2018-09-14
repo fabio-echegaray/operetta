@@ -6,9 +6,11 @@ import skimage.draw as draw
 from PIL import Image
 from PIL.ImageQt import ImageQt
 from PyQt4 import QtCore, uic
+from PyQt4.Qt import QMutex
 from PyQt4.QtCore import *
+from PyQt4.QtCore import QThread
 from PyQt4.QtGui import QApplication, QPixmap, QWidget
-from matplotlib.backends.backend_qt4agg import (FigureCanvas)
+from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from matplotlib.figure import Figure, SubplotParams
 from matplotlib.ticker import EngFormatter
 from skimage.io import imread
@@ -22,6 +24,8 @@ color_red = (65535, 0, 0)
 color_green = (0, 65535, 0)
 color_blue = (0, 0, 65535)
 color_yellow = (65535, 65535, 0)
+sp = SubplotParams(left=0., bottom=0., right=1., top=1.)
+mydpi = 72
 
 
 def get_crop_bbox(image, qlabel, r, c):
@@ -54,6 +58,114 @@ def canvas_to_pil(canvas):
     w, h = canvas.get_width_height()[::-1]
     im = Image.frombytes("RGB", (w, h), s)
     return im
+
+
+class renderImagesThread(QThread):
+    def __init__(self, hoechst, edu, pericentrin, tubulin, cell_list, nucleus_list, centrosome_list, largeQLabel,
+                 smallQLabel):
+        """
+        Make a new thread instance with images to render and features
+        as parameters.
+
+        :param subreddits: A list of subreddit names
+        :type subreddits: list
+        """
+        QThread.__init__(self)
+
+        self.hoechst = hoechst
+        self.edu = edu
+        self.pericentrin = pericentrin
+        self.tubulin = tubulin
+        self.cells = cell_list
+        self.nuclei = nucleus_list
+        self.centrosomes = centrosome_list
+        self.id = -1
+        self.nucleus = None
+        self.cell = None
+        self.centrosome = None
+        self.lqlbl = largeQLabel
+        self.sqlbl = smallQLabel
+
+    def __del__(self):
+        self.wait()
+
+    def setIndividual(self, id, nuc, cll, cntr):
+        """
+        Sets the individual for feature plotting.
+
+        :param nuc: A shapely polygon for the nucleus boundary
+        :type nuc: Polygon
+        :param cll: A shapely polygon for the cell boundary
+        :type cll: Polygon
+        :param cll: A list of shapely points for centrosomes
+        :type cll: list
+        """
+        self.id = id
+        self.nucleus = nuc
+        self.cell = cll
+        self.centrosome = cntr
+
+    def run(self):
+        """
+        Go over every item in the
+        """
+
+        cen = self.nucleus.centroid
+
+        # create a matplotlib axis and plot edu image
+        fig = Figure((self.sqlbl.width() / mydpi, self.sqlbl.height() / mydpi), subplotpars=sp, dpi=mydpi)
+        canvas = FigureCanvas(fig)
+        ax = fig.gca()
+        ax.set_aspect('equal')
+        ax.set_axis_off()
+        l, b, w, h = fig.bbox.bounds
+
+        ax.plot(cen.x, cen.y, color='red', marker='+', linewidth=1, solid_capstyle='round', zorder=2)
+
+        x, y = self.nucleus.exterior.xy
+        ax.plot(x, y, color='red', linewidth=1, solid_capstyle='round', zorder=2)
+
+        ax.set_xlim(cen.x - w / 2, cen.x + w / 2)
+        ax.set_ylim(cen.y - h / 2, cen.y + h / 2)
+        # plot edu + boundaries
+        ax.imshow(self.edu, cmap='gray')
+
+        self.qimg_edu = ImageQt(canvas_to_pil(canvas))
+
+        # plot rest of features
+        fig = Figure((self.lqlbl.width() / mydpi, self.lqlbl.height() / mydpi), subplotpars=sp, dpi=mydpi)
+        canvas = FigureCanvas(fig)
+        ax = fig.gca()
+        ax.set_aspect('equal')
+        ax.set_axis_off()
+        l, b, w, h = fig.bbox.bounds
+
+        x, y = self.nucleus.exterior.xy
+        ax.plot(x, y, color='red', linewidth=1, solid_capstyle='round', zorder=2)
+        ax.plot(cen.x, cen.y, color='red', marker='+', linewidth=1, solid_capstyle='round', zorder=2)
+
+        ax.set_xlim(cen.x - w / 2, cen.x + w / 2)
+        ax.set_ylim(cen.y - h / 2, cen.y + h / 2)
+        # plot edu + boundaries
+        ax.imshow(self.edu, cmap='gray')
+
+        if self.cell is not None:
+            x, y = self.cell.exterior.xy
+            ax.plot(x, y, color='green', linewidth=1, solid_capstyle='round', zorder=1)
+
+        if self.centrosome is not None:
+            for cn in self.centrosome:
+                c = plt.Circle((cn.x, cn.y), facecolor='none', edgecolor='yellow', linewidth=1, zorder=5)
+                ax.add_artist(c)
+
+        ax.imshow(self.hoechst, cmap='gray')
+        self.qimg_hoechst = ImageQt(canvas_to_pil(canvas))
+
+        ax.imshow(self.pericentrin, cmap='gray')
+        self.qimg_peri = ImageQt(canvas_to_pil(canvas))
+
+        ax.imshow(self.tubulin, cmap='gray')
+        self.qimg_tubulin = ImageQt(canvas_to_pil(canvas))
 
 
 class ExplorationGui(QWidget):
@@ -104,12 +216,18 @@ class ExplorationGui(QWidget):
             self.cells, _ = cell_boundary(self.tubulin, self.hoechst)
             np.save(filename, self.cells)
 
-        self.build_df()
-
-        self.render_cell()
         self.prevButton.pressed.connect(self.on_prev_button)
         self.nextButton.pressed.connect(self.on_next_button)
         self.plotButton.pressed.connect(self.plot_everything_debug)
+
+        self.renderingThread = renderImagesThread(self.hoechst, self.edu, self.pericentrin, self.tubulin, self.cells,
+                                                  self.nuclei_features, self.centrosomes, self.imgCell, self.imgEdu)
+        self.renderingThread.finished.connect(self.render_images)
+        self.renderingThread.terminated.connect(self.trigger_render)
+        self.renderingMutex = QMutex()
+
+        self.build_df()
+        self.render_cell()
 
     def build_df(self):
         self.df = pd.DataFrame()
@@ -146,90 +264,28 @@ class ExplorationGui(QWidget):
 
         nuc_f = self.nuclei_features[self.current_nuclei_id]
         nuc_bnd = nuc_f['boundary']
-        nb = Polygon(nuc_bnd)
+
+        valid, cell, nucleus, cntrsmes = get_nuclei_features(self.hoechst, nuc_bnd, self.cells, self.nuclei_features,
+                                                             self.centrosomes)
+
+        self.renderingMutex.lock()
+        if self.renderingThread.isRunning():
+            logger.debug('terminating rendering thread')
+            self.renderingThread.quit()
+        else:
+            self.renderingThread.setIndividual(self.current_nuclei_id, nucleus, cell, cntrsmes)
+            self.trigger_render()
+        self.renderingMutex.unlock()
+
         c, r = nuc_bnd[:, 0], nuc_bnd[:, 1]
         r_n, c_n = draw.polygon(r, c)
         logger.debug('feat id: %d' % nuc_f['id'])
 
-        cen = nb.centroid
-
-        self.mplEduHist.clear()
-        sns.distplot(self.edu[r_n, c_n], kde=False, rug=True, ax=self.mplEduHist.canvas.ax)
-        self.mplEduHist.canvas.ax.xaxis.set_major_formatter(EngFormatter())
-        self.mplEduHist.canvas.ax.set_xlim([0, 2 ** 16])
-        self.mplEduHist.canvas.draw()
-
-        valid, cell, nuclei, cntrsmes = get_nuclei_features(self.hoechst, nuc_bnd, self.cells, self.nuclei_features,
-                                                            self.centrosomes)
-
-        # create a matplotlib axis and plot edu image
-        mydpi = 72
-        sp = SubplotParams(left=0., bottom=0., right=1., top=1.)
-        fig = Figure((self.imgEdu.width() / mydpi, self.imgEdu.height() / mydpi), subplotpars=sp, dpi=mydpi)
-        canvas = FigureCanvas(fig)
-        ax = fig.gca()
-        ax.set_aspect('equal')
-        ax.set_axis_off()
-
-        ax.plot(cen.x, cen.y, color='red', marker='+', linewidth=1, solid_capstyle='round', zorder=2)
-
-        x, y = nuclei.exterior.xy
-        ax.plot(x, y, color='red', linewidth=1, solid_capstyle='round', zorder=2)
-
-        size = canvas.size()
-        ax.set_xlim(cen.x - size.width() / 2, cen.x + size.width() / 2)
-        ax.set_ylim(cen.y - size.height() / 2, cen.y + size.height() / 2)
-        # plot edu + boundaries
-        ax.imshow(self.edu, cmap='gray')
-
-        qimg_edu = ImageQt(canvas_to_pil(canvas))
-
-        # plot rest of features
-        fig = Figure((self.imgCell.width() / mydpi, self.imgCell.height() / mydpi), subplotpars=sp, dpi=mydpi)
-        canvas = FigureCanvas(fig)
-        ax = fig.gca()
-        ax.set_aspect('equal')
-        ax.set_axis_off()
-
-        x, y = nuclei.exterior.xy
-        ax.plot(x, y, color='red', linewidth=1, solid_capstyle='round', zorder=2)
-        ax.plot(cen.x, cen.y, color='red', marker='+', linewidth=1, solid_capstyle='round', zorder=2)
-
-        x, y = nuclei.exterior.xy
-        ax.plot(x, y, color='red', linewidth=1, solid_capstyle='round', zorder=2)
-
-        size = canvas.size()
-        ax.set_xlim(cen.x - size.width() / 2, cen.x + size.width() / 2)
-        ax.set_ylim(cen.y - size.height() / 2, cen.y + size.height() / 2)
-        # plot edu + boundaries
-        ax.imshow(self.edu, cmap='gray')
-
-        if cell is not None:
-            x, y = cell.exterior.xy
-            ax.plot(x, y, color='green', linewidth=1, solid_capstyle='round', zorder=1)
-
-        if cntrsmes is not None:
-            for cn in cntrsmes:
-                c = plt.Circle((cn.x, cn.y), facecolor='none', edgecolor='yellow', linewidth=1, zorder=5)
-                ax.add_artist(c)
-
-        size = canvas.size()
-        ax.set_xlim(cen.x - size.width() / 2, cen.x + size.width() / 2)
-        ax.set_ylim(cen.y - size.height() / 2, cen.y + size.height() / 2)
-        # plot hoechst + boundaries
-        ax.imshow(self.hoechst, cmap='gray')
-        qimg_hoechst = ImageQt(canvas_to_pil(canvas))
-        # plot pericentrin + boundaries
-        ax.imshow(self.pericentrin, cmap='gray')
-        qimg_peri = ImageQt(canvas_to_pil(canvas))
-        # plot tubulin + boundaries
-        ax.imshow(self.tubulin, cmap='gray')
-        qimg_tubulin = ImageQt(canvas_to_pil(canvas))
-
-        self.imgEdu.setPixmap(QPixmap.fromImage(qimg_edu))
-        self.imgCell.setPixmap(QPixmap.fromImage(qimg_hoechst))
-        self.imgPericentrin.setPixmap(QPixmap.fromImage(qimg_peri))
-        self.imgTubulin.setPixmap(QPixmap.fromImage(qimg_tubulin))
+        self.mplEduHist.hide()
+        self.imgEdu.clear()
+        self.imgCell.clear()
+        self.imgPericentrin.clear()
+        self.imgTubulin.clear()
 
         self.lblEduMin.setText('min ' + eng_string(self.edu[r_n, c_n].min(), format='%0.1f', si=True))
         self.lblEduMax.setText('max ' + eng_string(self.edu[r_n, c_n].max(), format='%0.1f', si=True))
@@ -247,10 +303,11 @@ class ExplorationGui(QWidget):
         ax = fig.gca()
         ax.set_aspect('equal')
         ax.set_axis_off()
+        l, b, w, h = fig.bbox.bounds
         if valid:
             c1 = cntrsmes[0]
-            self.lblDist_nc.setText('%0.2f' % nuclei.centroid.distance(c1))
-            self.lblDist_nb.setText('%0.2f' % nuclei.exterior.distance(c1))
+            self.lblDist_nc.setText('%0.2f' % nucleus.centroid.distance(c1))
+            self.lblDist_nb.setText('%0.2f' % nucleus.exterior.distance(c1))
             self.lblDist_cc.setText('%0.2f' % cell.centroid.distance(c1))
             self.lblDist_cb.setText('%0.2f' % cell.exterior.distance(c1))
 
@@ -260,10 +317,9 @@ class ExplorationGui(QWidget):
                                linestyle='--', linewidth=1, zorder=5)
                 ax.add_artist(c)
 
-            size = canvas.size()
             c1 = cntrsmes[0]
-            ax.set_xlim(c1.x - size.width() / 8, c1.x + size.width() / 8)
-            ax.set_ylim(c1.y - size.height() / 8, c1.y + size.height() / 8)
+            ax.set_xlim(c1.x - w / 8, c1.x + w / 8)
+            ax.set_ylim(c1.y - h / 8, c1.y + h / 8)
 
             qimg_closeup = ImageQt(canvas_to_pil(canvas))
             self.imgCentrCloseup.setPixmap(QPixmap.fromImage(qimg_closeup))
@@ -273,10 +329,42 @@ class ExplorationGui(QWidget):
             self.lblDist_cc.setText('-')
             self.lblDist_cb.setText('-')
 
-            size = canvas.size()
-            qimg_closeup = ImageQt(Image.new('RGB', (size.width(), size.height())))
+            qimg_closeup = ImageQt(Image.new('RGB', (int(w), int(h))))
             self.imgCentrCloseup.setPixmap(QPixmap.fromImage(qimg_closeup))
         self.update()
+
+    @QtCore.pyqtSlot()
+    def trigger_render(self):
+        self.renderingThread.start()
+
+    @QtCore.pyqtSlot()
+    def render_images(self):
+        if self.current_nuclei_id != self.renderingThread.id:
+            logger.info('rendering thread finished but for a different id! self %d thread %d' % (
+                self.current_nuclei_id, self.renderingThread.id))
+
+            self.render_cell()
+            return
+
+        if self.renderingMutex.tryLock():
+            self.imgEdu.setPixmap(QPixmap.fromImage(self.renderingThread.qimg_edu))
+            self.imgCell.setPixmap(QPixmap.fromImage(self.renderingThread.qimg_hoechst))
+            self.imgPericentrin.setPixmap(QPixmap.fromImage(self.renderingThread.qimg_peri))
+            self.imgTubulin.setPixmap(QPixmap.fromImage(self.renderingThread.qimg_tubulin))
+
+            nuc_f = self.nuclei_features[self.current_nuclei_id]
+            nuc_bnd = nuc_f['boundary']
+            c, r = nuc_bnd[:, 0], nuc_bnd[:, 1]
+            r_n, c_n = draw.polygon(r, c)
+
+            self.mplEduHist.clear()
+            sns.distplot(self.edu[r_n, c_n], kde=False, rug=True, ax=self.mplEduHist.canvas.ax)
+            self.mplEduHist.canvas.ax.xaxis.set_major_formatter(EngFormatter())
+            self.mplEduHist.canvas.ax.set_xlim([0, 2 ** 16])
+            self.mplEduHist.canvas.draw()
+            self.mplEduHist.show()
+
+            self.renderingMutex.unlock()
 
     @QtCore.pyqtSlot()
     def plot_everything_debug(self):
@@ -309,6 +397,27 @@ class ExplorationGui(QWidget):
         ax1.xaxis.set_major_formatter(EngFormatter())
         ax1.set_ylabel('distance [um]')
         ax2.set_ylabel('distance [um]')
+        # ax1.set_title('')
+
+        f = plt.figure(31)
+        ax1 = f.add_subplot(111)
+        ax1.xaxis.set_major_formatter(EngFormatter())
+        ax1.yaxis.set_major_formatter(EngFormatter())
+        ax1.set_ylabel('distance [um]')
+
+        df = self.df
+        df = df.loc[:, ['dna', 'c1_d_nuc_centr', 'c1_d_nuc_bound', 'c1_d_cell_centr', 'c1_d_cell_bound']]
+        df = df.rename(columns={'c1_d_nuc_centr': 'nuclear centroid',
+                                'c1_d_nuc_bound': 'nuclear boundary',
+                                'c1_d_cell_centr': 'cell centroid',
+                                'c1_d_cell_bound': 'cell boundary',})
+        dd = pd.melt(df, id_vars=['dna'])
+        dd = dd.rename(columns={'value': 'distance'})
+
+        g = sns.FacetGrid(dd, col="variable", col_wrap=2)
+        # g = g.map(plt.scatter, "dna", "distance", edgecolor="w")
+        g = g.map(sns.regplot, "dna", "distance")
+        g.add_legend()
 
     @QtCore.pyqtSlot()
     def on_prev_button(self):
