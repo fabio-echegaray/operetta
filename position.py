@@ -1,8 +1,13 @@
+import logging
+import os
 import sys
 
+import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import seaborn as sns
 import skimage.draw as draw
+import skimage.exposure as exposure
 from PIL import Image
 from PIL.ImageQt import ImageQt
 from PyQt4 import QtCore, uic
@@ -13,9 +18,10 @@ from PyQt4.QtGui import QApplication, QPixmap, QWidget
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from matplotlib.figure import Figure, SubplotParams
 from matplotlib.ticker import EngFormatter
-from skimage.io import imread
+from shapely.geometry.polygon import Polygon
 
-from measurements import *
+import measurements as m
+import operetta as o
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger('hhlab')
@@ -60,7 +66,7 @@ def canvas_to_pil(canvas):
     return im
 
 
-class renderImagesThread(QThread):
+class RenderImagesThread(QThread):
     def __init__(self, hoechst, edu, pericentrin, tubulin, cell_list, nucleus_list, centrosome_list, largeQLabel,
                  smallQLabel):
         """
@@ -168,8 +174,90 @@ class renderImagesThread(QThread):
         self.qimg_tubulin = ImageQt(canvas_to_pil(canvas))
 
 
+class BrowseGui(QWidget):
+    def __init__(self, operetta=None, exploration_gui=None):
+        if exploration_gui is None:
+            raise Exception('need a gui object to show my things.')
+
+        if operetta is not None:
+            logger.info('using operetta file structure.')
+            self.op = operetta
+            self.gen = self.op.stack_generator()
+            row, col, fid = self.gen.__next__()
+            logger.debug('fid=%d' % fid)
+            self.hoechst, self.tubulin, self.pericentrin, self.edu = self.op.max_projection(row, col, fid)
+
+        self.egui = exploration_gui
+
+        QWidget.__init__(self)
+        uic.loadUi('gui_browse.ui', self)
+        self.nextButton.pressed.connect(self.on_next_button)
+        self.processButton.pressed.connect(self.on_process_button)
+
+        fig = Figure((self.imgHoechst.width() / mydpi, self.imgHoechst.height() / mydpi), subplotpars=sp, dpi=mydpi)
+        self.canvas = FigureCanvas(fig)
+        self.ax = fig.gca()
+        self.ax.set_aspect('equal')
+        self.ax.set_axis_off()
+
+        self.render_images()
+
+    @QtCore.pyqtSlot()
+    def on_next_button(self):
+        logger.info('on_next_button')
+        row, col, fid = self.gen.__next__()
+        logger.debug('fid=%d' % fid)
+        self.hoechst, self.tubulin, self.pericentrin, self.edu = self.op.max_projection(row, col, fid)
+        self.render_images()
+
+    @QtCore.pyqtSlot()
+    def on_process_button(self):
+        logger.info('on_process_button')
+
+        self.egui.hoechst = self.hoechst
+        self.egui.tubulin = self.tubulin
+        self.egui.pericentrin = self.pericentrin
+        self.egui.edu = self.edu
+
+        self.egui.process_images()
+
+    def render_images(self):
+        logger.info('render image')
+
+        self.imgHoechst.clear()
+        self.imgEdu.clear()
+        self.imgPericentrin.clear()
+        self.imgTubulin.clear()
+
+        self.ax.imshow(self.hoechst, cmap='gray')
+        qimg = ImageQt(canvas_to_pil(self.canvas))
+        self.imgHoechst.setPixmap(QPixmap.fromImage(qimg))
+
+        self.ax.imshow(self.edu, cmap='gray')
+        qimg = ImageQt(canvas_to_pil(self.canvas))
+        self.imgEdu.setPixmap(QPixmap.fromImage(qimg))
+
+        self.ax.imshow(self.tubulin, cmap='gray')
+        qimg = ImageQt(canvas_to_pil(self.canvas))
+        self.imgTubulin.setPixmap(QPixmap.fromImage(qimg))
+
+        self.ax.imshow(self.pericentrin, cmap='gray')
+        qimg = ImageQt(canvas_to_pil(self.canvas))
+        self.imgPericentrin.setPixmap(QPixmap.fromImage(qimg))
+
+        self.update()
+
+
 class ExplorationGui(QWidget):
-    def __init__(self, hfname, efname, pfname, tfname):
+    def __init__(self):
+
+        self.hoechst = None
+        self.edu = None
+        self.pericentrin = None
+        self.tubulin = None
+        # self.resolution = 4.5
+        self.resolution = 1550.3
+
         QWidget.__init__(self)
         uic.loadUi('gui_selection.ui', self)
         for l in [self.lblEduMin, self.lblEduMax, self.lblEduAvg, self.lblTubMin, self.lblTubMax, self.lblTubAvg]:
@@ -177,50 +265,33 @@ class ExplorationGui(QWidget):
 
         self.current_nuclei_id = 0
         self.centrosome_dropped = False
-        self.resolution = 4.5
-
-        logger.info('reading image files')
-        self.hoechst = imread(hfname)
-        self.edu = imread(efname)
-        self.pericentrin = imread(pfname)
-        self.tubulin = imread(tfname)
-
-        self.pericentrin = exposure.equalize_adapthist(self.pericentrin, clip_limit=0.03)
-
-        filename = 'out/nuclei.npy'
-        if os.path.exists(filename):
-            logger.info('reading nuclei file data')
-            self.nuclei_features = np.load(filename)
-        else:
-            logger.info('applying nuclei algorithm')
-            r = 6  # [um]
-            imgseg, radii = nuclei_segmentation(self.hoechst)
-            self.nuclei_features = nuclei_features(imgseg, area_thresh=(r * self.resolution) ** 2 * np.pi)
-            np.save(filename, self.nuclei_features)
-
-        filename = 'out/centrosomes.npy'
-        if os.path.exists(filename):
-            logger.info('reading centrosome file data')
-            self.centrosomes = np.load(filename)
-        else:
-            logger.info('applying centrosome algorithm')
-            self.centrosomes = centrosomes(self.pericentrin, max_sigma=self.resolution * 0.2)
-            np.save(filename, self.centrosomes)
-
-        filename = 'out/cells.npy'
-        if os.path.exists(filename):
-            logger.info('reading cell boundary file data')
-            self.cells = np.load(filename)
-        else:
-            logger.info('applying cell boundary algorithm')
-            self.cells, _ = cell_boundary(self.tubulin, self.hoechst)
-            np.save(filename, self.cells)
 
         self.prevButton.pressed.connect(self.on_prev_button)
         self.nextButton.pressed.connect(self.on_next_button)
         self.plotButton.pressed.connect(self.plot_everything_debug)
 
-        self.renderingThread = renderImagesThread(self.hoechst, self.edu, self.pericentrin, self.tubulin, self.cells,
+    def process_images(self):
+        if self.hoechst is None or self.edu is None or self.pericentrin is None or self.tubulin is None:
+            raise Exception('empty images on some channels.')
+
+        self.pericentrin = exposure.equalize_adapthist(self.pericentrin, clip_limit=0.03)
+
+        logger.info('applying nuclei algorithm')
+        r = 6  # [um]
+        imgseg, radii = m.nuclei_segmentation(self.hoechst, radius=r * self.resolution)
+        self.nuclei_features = m.nuclei_features(imgseg, area_thresh=(r * self.resolution) ** 2 * np.pi)
+
+        if len(self.nuclei_features) == 0:
+            logger.info('found no nuclear features on the hoechst image.')
+            return
+
+        logger.info('applying centrosome algorithm')
+        self.centrosomes = m.centrosomes(self.pericentrin, max_sigma=self.resolution * 0.2)
+
+        logger.info('applying cell boundary algorithm')
+        self.cells, _ = m.cell_boundary(self.tubulin, self.hoechst)
+
+        self.renderingThread = RenderImagesThread(self.hoechst, self.edu, self.pericentrin, self.tubulin, self.cells,
                                                   self.nuclei_features, self.centrosomes, self.imgCell, self.imgEdu)
         self.renderingThread.finished.connect(self.render_images)
         self.renderingThread.terminated.connect(self.trigger_render)
@@ -232,8 +303,8 @@ class ExplorationGui(QWidget):
     def build_df(self):
         self.df = pd.DataFrame()
         for nuc in self.nuclei_features:
-            valid, cell, nuclei, cntrsmes = get_nuclei_features(self.hoechst, nuc['boundary'], self.cells,
-                                                                self.nuclei_features, self.centrosomes)
+            valid, cell, nuclei, cntrsmes = m.get_nuclei_features(self.hoechst, nuc['boundary'], self.cells,
+                                                                  self.nuclei_features, self.centrosomes)
             if valid:
                 twocntr = len(cntrsmes) == 2
                 c1 = cntrsmes[0]
@@ -265,8 +336,8 @@ class ExplorationGui(QWidget):
         nuc_f = self.nuclei_features[self.current_nuclei_id]
         nuc_bnd = nuc_f['boundary']
 
-        valid, cell, nucleus, cntrsmes = get_nuclei_features(self.hoechst, nuc_bnd, self.cells, self.nuclei_features,
-                                                             self.centrosomes)
+        valid, cell, nucleus, cntrsmes = m.get_nuclei_features(self.hoechst, nuc_bnd, self.cells, self.nuclei_features,
+                                                               self.centrosomes)
 
         self.renderingMutex.lock()
         if self.renderingThread.isRunning():
@@ -287,12 +358,12 @@ class ExplorationGui(QWidget):
         self.imgPericentrin.clear()
         self.imgTubulin.clear()
 
-        self.lblEduMin.setText('min ' + eng_string(self.edu[r_n, c_n].min(), format='%0.1f', si=True))
-        self.lblEduMax.setText('max ' + eng_string(self.edu[r_n, c_n].max(), format='%0.1f', si=True))
-        self.lblEduAvg.setText('avg ' + eng_string(self.edu[r_n, c_n].mean(), format='%0.1f', si=True))
-        self.lblTubMin.setText('min ' + eng_string(self.tubulin[r_n, c_n].min(), format='%0.1f', si=True))
-        self.lblTubMax.setText('max ' + eng_string(self.tubulin[r_n, c_n].max(), format='%0.1f', si=True))
-        self.lblTubAvg.setText('avg ' + eng_string(self.tubulin[r_n, c_n].mean(), format='%0.1f', si=True))
+        self.lblEduMin.setText('min ' + m.eng_string(self.edu[r_n, c_n].min(), format='%0.1f', si=True))
+        self.lblEduMax.setText('max ' + m.eng_string(self.edu[r_n, c_n].max(), format='%0.1f', si=True))
+        self.lblEduAvg.setText('avg ' + m.eng_string(self.edu[r_n, c_n].mean(), format='%0.1f', si=True))
+        self.lblTubMin.setText('min ' + m.eng_string(self.tubulin[r_n, c_n].min(), format='%0.1f', si=True))
+        self.lblTubMax.setText('max ' + m.eng_string(self.tubulin[r_n, c_n].max(), format='%0.1f', si=True))
+        self.lblTubAvg.setText('avg ' + m.eng_string(self.tubulin[r_n, c_n].mean(), format='%0.1f', si=True))
         self.lblCentr_n.setText('%d' % (len(cntrsmes) if cntrsmes is not None else 0))
         self.lblId.setText('id %d' % nuc_f['id'])
         self.lblOK.setText('OK' if valid else 'no OK')
@@ -410,7 +481,7 @@ class ExplorationGui(QWidget):
         df = df.rename(columns={'c1_d_nuc_centr': 'nuclear centroid',
                                 'c1_d_nuc_bound': 'nuclear boundary',
                                 'c1_d_cell_centr': 'cell centroid',
-                                'c1_d_cell_bound': 'cell boundary',})
+                                'c1_d_cell_bound': 'cell boundary', })
         dd = pd.melt(df, id_vars=['dna'])
         dd = dd.rename(columns={'value': 'distance'})
 
@@ -422,17 +493,25 @@ class ExplorationGui(QWidget):
     @QtCore.pyqtSlot()
     def on_prev_button(self):
         logger.info('on_prev_button')
+        # self.prevButton.setEnabled(False)
         self.current_nuclei_id = (self.current_nuclei_id - 1) % len(self.nuclei_features)
         self.render_cell()
+        # self.prevButton.setEnabled(True)
 
     @QtCore.pyqtSlot()
     def on_next_button(self):
         logger.info('on_next_button')
+        # self.nextButton.setEnabled(False)
         self.current_nuclei_id = (self.current_nuclei_id + 1) % len(self.nuclei_features)
         self.render_cell()
+        # self.nextButton.setEnabled(True)
 
 
 if __name__ == '__main__':
+    b_path = '/Volumes/H.H. Lab (fab)/Fabio/data/raw/20180925 u2os edu operetta/LOWER COVERSLID__2018-09-25T13_49_08-Measurement 1/Images/'
+
+    operetta = o.Montage(b_path)
+
     base_path = os.path.abspath('%s' % os.getcwd())
     logging.info('Qt version:' + QT_VERSION_STR)
     logging.info('PyQt version:' + PYQT_VERSION_STR)
@@ -442,18 +521,13 @@ if __name__ == '__main__':
 
     app = QApplication(sys.argv)
 
-    b_path = '/Users/Fabio/data/20180817 U2OS cenpf peric edu formfix/'
-    gui = ExplorationGui(
-        hfname=b_path + 'Capture 3 - Position 0 [64] Montage.Project Maximum Z_XY1534504412_Z0_T0_C0.tif',
-        tfname=b_path + 'Capture 3 - Position 0 [64] Montage.Project Maximum Z_XY1534504412_Z0_T0_C1.tif',
-        pfname=b_path + 'Capture 3 - Position 0 [64] Montage.Project Maximum Z_XY1534504412_Z0_T0_C2.tif',
-        efname=b_path + 'Capture 3 - Position 0 [64] Montage.Project Maximum Z_XY1534504412_Z0_T0_C3.tif'
-    )
-
-    from pycallgraph import PyCallGraph
-    from pycallgraph.output import GraphvizOutput
-
-    with PyCallGraph(output=GraphvizOutput()):
-        gui.show()
-        code = app.exec_()
+    egui = ExplorationGui()
+    bgui = BrowseGui(operetta=operetta, exploration_gui=egui)
+    # from pycallgraph import PyCallGraph
+    # from pycallgraph.output import GraphvizOutput
+    #
+    # with PyCallGraph(output=GraphvizOutput()):
+    bgui.show()
+    egui.show()
+    code = app.exec_()
     sys.exit(code)

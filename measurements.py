@@ -1,6 +1,5 @@
 import logging
 import math
-import os
 from math import sqrt
 
 import cv2
@@ -61,20 +60,12 @@ def eng_string(x, format='%s', si=False):
     return ('%s' + format + '%s') % (sign, x3, exp3_text)
 
 
-def nuclei_segmentation(image, ax=None):
+def nuclei_segmentation(image, ax=None, radius=30):
+    logger.info('applying blobs algorithm')
     image_gray = color.rgb2gray(image)
-
-    filename = 'out/blobs.npy'
-    if os.path.exists(filename):
-        logger.info('reading blob file data')
-        blobs_log = np.load(filename)
-    else:
-        logger.info('applying blobs algorithm')
-        blobs_log = feature.blob_log(image_gray, max_sigma=30, num_sigma=10, threshold=.1)
-        # Compute radii in the 3rd column.
-        blobs_log[:, 2] = blobs_log[:, 2] * sqrt(2)
-
-        np.save(filename, blobs_log)
+    blobs_log = feature.blob_log(image_gray, min_sigma=0.8 * radius, max_sigma=1.2 * radius, num_sigma=10, threshold=.1)
+    # Compute radii in the 3rd column.
+    blobs_log[:, 2] = blobs_log[:, 2] * sqrt(2)
 
     # apply threshold
     thresh_otsu = filters.threshold_otsu(image)
@@ -131,7 +122,6 @@ def nuclei_features(image, ax=None, area_thresh=100):
 
 def centrosomes(image, ax=None, max_sigma=1):
     blobs_log = feature.blob_log(image, max_sigma=max_sigma, num_sigma=10, threshold=.1)
-    logger.debug(blobs_log)
     # Compute radii in the 3rd column.
     blobs_log[:, 2] = blobs_log[:, 2] * sqrt(2)
     tform = tf.SimilarityTransform(rotation=math.pi / 2)
