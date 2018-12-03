@@ -11,7 +11,6 @@ import skimage.exposure as exposure
 from PIL import Image
 from PIL.ImageQt import ImageQt
 from PyQt4 import QtCore, uic
-from PyQt4.Qt import QMutex
 from PyQt4.QtCore import *
 from PyQt4.QtCore import QThread
 from PyQt4.QtGui import QApplication, QPixmap, QWidget
@@ -206,6 +205,7 @@ class BrowseGui(QWidget):
     def on_next_button(self):
         logger.info('on_next_button')
         row, col, fid = self.gen.__next__()
+        # row, col, fid = 1, 1, 1000
         logger.debug('fid=%d' % fid)
         self.hoechst, self.tubulin, self.pericentrin, self.edu = self.op.max_projection(row, col, fid)
         self.render_images()
@@ -274,19 +274,21 @@ class ExplorationGui(QWidget):
         if self.hoechst is None or self.edu is None or self.pericentrin is None or self.tubulin is None:
             raise Exception('empty images on some channels.')
 
-        self.pericentrin = exposure.equalize_adapthist(self.pericentrin, clip_limit=0.03)
-
         logger.info('applying nuclei algorithm')
         r = 6  # [um]
-        imgseg, radii = m.nuclei_segmentation(self.hoechst, radius=r * self.resolution)
-        self.nuclei_features = m.nuclei_features(imgseg, area_thresh=(r * self.resolution) ** 2 * np.pi)
+        imgseg, props = m.nuclei_segmentation(self.hoechst, radius=r * self.resolution)
 
-        if len(self.nuclei_features) == 0:
+        if len(props) == 0:
             logger.info('found no nuclear features on the hoechst image.')
             return
 
+        # self.nuclei_features = m.nuclei_features(imgseg, area_thresh=(r * self.resolution) ** 2 * np.pi)
+        self.nuclei_features = m.nuclei_features(imgseg)
+
         logger.info('applying centrosome algorithm')
+        self.pericentrin = exposure.equalize_adapthist(self.pericentrin, clip_limit=0.03)
         self.centrosomes = m.centrosomes(self.pericentrin, max_sigma=self.resolution * 0.2)
+        logger.debug('centrosomes {:s}'.format(str(self.centrosomes)))
 
         logger.info('applying cell boundary algorithm')
         self.cells, _ = m.cell_boundary(self.tubulin, self.hoechst)
@@ -338,6 +340,7 @@ class ExplorationGui(QWidget):
 
         valid, cell, nucleus, cntrsmes = m.get_nuclei_features(self.hoechst, nuc_bnd, self.cells, self.nuclei_features,
                                                                self.centrosomes)
+        logger.debug('{} {} {} {}'.format(valid, cell, nucleus, cntrsmes))
 
         self.renderingMutex.lock()
         if self.renderingThread.isRunning():
@@ -508,9 +511,30 @@ class ExplorationGui(QWidget):
 
 
 if __name__ == '__main__':
-    b_path = '/Volumes/H.H. Lab (fab)/Fabio/data/raw/20180925 u2os edu operetta/LOWER COVERSLID__2018-09-25T13_49_08-Measurement 1/Images/'
+    b_path = '/Volumes/Unbreakable/data/operetta/u2os__2018-10-26T17_55_11-Measurement 4/Images'
 
     operetta = o.Montage(b_path)
+
+    # logger.info('applying nuclei algorithm')
+    # outdf = pd.DataFrame()
+    # for row, col, fid in operetta.stack_generator():
+    #     logger.info('%d %d %d' % (row, col, fid))
+    #     hoechst, tubulin, pericentrin, edu = operetta.max_projection(row, col, fid)
+    #     r = 6  # [um]
+    #     resolution = 1550.3
+    #     imgseg, props = m.nuclei_segmentation(hoechst, radius=r * resolution)
+    #     # nuclei_features = m.nuclei_features(imgseg, area_thresh=(r * resolution) ** 2 * np.pi)
+    #     if len(props) > 0:
+    #         # interested = props[(props['eccentricity'] > 0.6)].index
+    #         outdf = outdf.append(props)
+    # pd.to_pickle(outdf, 'out/nuclei.pandas')
+
+    # outdf = pd.read_pickle('out/nuclei.pandas')
+    # outdf = outdf[outdf['area'] < 1e4]
+    # sns.scatterplot('area', 'mean_intensity', data=outdf)
+    # # plt.hist(outdf['mean_intensity'], bins=100,log=True)
+    # # plt.hist(outdf['area'], bins=100, log=True)
+    # plt.show()
 
     base_path = os.path.abspath('%s' % os.getcwd())
     logging.info('Qt version:' + QT_VERSION_STR)

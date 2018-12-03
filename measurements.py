@@ -3,10 +3,9 @@ import math
 from math import sqrt
 
 import cv2
-import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 import scipy.ndimage as ndi
-import skimage.color as color
 import skimage.exposure as exposure
 import skimage.feature as feature
 import skimage.filters as filters
@@ -60,44 +59,62 @@ def eng_string(x, format='%s', si=False):
     return ('%s' + format + '%s') % (sign, x3, exp3_text)
 
 
-def nuclei_segmentation(image, ax=None, radius=30):
-    logger.info('applying blobs algorithm')
-    image_gray = color.rgb2gray(image)
-    blobs_log = feature.blob_log(image_gray, min_sigma=0.8 * radius, max_sigma=1.2 * radius, num_sigma=10, threshold=.1)
-    # Compute radii in the 3rd column.
-    blobs_log[:, 2] = blobs_log[:, 2] * sqrt(2)
+def nuclei_segmentation(image, radius=30):
+    # image_gray = color.rgb2gray(image)
+    # blobs_log = feature.blob_log(image_gray, min_sigma=0.8 * radius, max_sigma=1.2 * radius, num_sigma=10, threshold=.1)
+    # # Compute radii in the 3rd column.
+    # blobs_log[:, 2] = blobs_log[:, 2] * sqrt(2)
 
     # apply threshold
-    thresh_otsu = filters.threshold_otsu(image)
-    thresh = image >= thresh_otsu
+    logger.info('thresholding images')
+    thresh_val = filters.threshold_otsu(image)
+    thresh = image >= thresh_val
     thresh = morphology.remove_small_holes(thresh)
     thresh = morphology.remove_small_objects(thresh)
     # thresh = morphology.closing(image > thresh, morphology.square(3))
 
     # remove artifacts connected to image border
     cleared = segmentation.clear_border(thresh)
+    label_image = measure.label(cleared)
 
-    radii_valid = blobs_log[:, 2] > 20
-    if ax is not None:
-        ax.imshow(cleared)
-        radii = blobs_log[radii_valid]
-        excluded = blobs_log[~radii_valid]
-        for blob in radii:
-            y, x, r = blob
-            c = plt.Circle((x, y), r, color='lime', linewidth=1, fill=False)
-            ax.add_patch(c)
-        for blob in excluded:
-            y, x, r = blob
-            c = plt.Circle((x, y), r, color='red', linewidth=0.2, fill=False)
-            ax.add_patch(c)
+    logger.info('computing properties')
+    properties = list()
+    indices = list()
+    # TODO: need integral of pixel intensity over surface
+    columns = ('area', 'bbox_area',
+               'centroid_x', 'centroid_u', 'eccentricity', 'equivalent_diameter',
+               'euler_number', 'extent',
+               'max_intensity', 'mean_intensity', 'min_intensity', 'orientation', 'perimeter')
+    for p in measure.regionprops(label_image, intensity_image=image):
+        properties.append([p.area,
+                           # p.bbox,
+                           p.bbox_area,
+                           p.centroid[0],
+                           p.centroid[1],
+                           p.eccentricity,
+                           p.equivalent_diameter,
+                           p.euler_number,
+                           p.extent,
+                           # p.inertia_tensor,
+                           p.max_intensity,
+                           p.mean_intensity,
+                           p.min_intensity,
+                           p.orientation,
+                           p.perimeter,
+                           ])
+        indices.append(p.label)
+    if not len(indices):
+        return label_image, pd.DataFrame([], index=[])
+    else:
+        indices = pd.Index(indices, name='label')
+        properties = pd.DataFrame(properties, index=indices, columns=columns)
 
-        ax.set_title('hoechst blobs')
-        ax.set_axis_off()
-
-    return cleared, radii_valid
+        return label_image, properties
 
 
 def nuclei_features(image, ax=None, area_thresh=100):
+    logger.info('nuclei_features')
+
     def polygon_area(x, y):
         return 0.5 * np.abs(np.dot(x, np.roll(y, 1)) - np.dot(y, np.roll(x, 1)))
 
@@ -120,8 +137,9 @@ def nuclei_features(image, ax=None, area_thresh=100):
     return _list
 
 
-def centrosomes(image, ax=None, max_sigma=1):
-    blobs_log = feature.blob_log(image, max_sigma=max_sigma, num_sigma=10, threshold=.1)
+def centrosomes(image, max_sigma=1):
+    # blobs_log = feature.blob_log(image,min_sigma=0.05, max_sigma=max_sigma, num_sigma=10, threshold=.1)
+    blobs_log = feature.blob_doh(image, min_sigma=0.05, max_sigma=max_sigma, num_sigma=10, threshold=.1)
     # Compute radii in the 3rd column.
     blobs_log[:, 2] = blobs_log[:, 2] * sqrt(2)
     tform = tf.SimilarityTransform(rotation=math.pi / 2)
@@ -131,7 +149,7 @@ def centrosomes(image, ax=None, max_sigma=1):
     return blobs_log
 
 
-def cell_boundary(tubulin, hoechst, ax=None, threshold=80, markers=None):
+def cell_boundary(tubulin, hoechst, threshold=80, markers=None):
     def build_gabor_filters():
         filters = []
         ksize = 9
@@ -155,7 +173,7 @@ def cell_boundary(tubulin, hoechst, ax=None, threshold=80, markers=None):
     p98 = np.percentile(hoechst, 98)
     hoechst = exposure.rescale_intensity(hoechst, in_range=(p2, p98))
 
-    # img = np.maximum(tubulin, 0.8 * hoechst)
+    # img = np.maximum(tubulin, hoechst)
     img = tubulin
 
     img = morphology.erosion(img, morphology.square(3))
