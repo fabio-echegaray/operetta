@@ -3,6 +3,9 @@ import re
 
 import numpy as np
 import pandas as pd
+from skimage import color
+from skimage import transform
+from skimage import exposure
 from skimage import io
 
 
@@ -47,8 +50,37 @@ class Montage:
 
     def stack_generator(self):
         group = self.files.groupby(['row', 'col', 'f'])
-        for ig, g in group:
+        l = len(group)
+        for k, (ig, g) in enumerate(group):
+            print('stack generator: retrieving %d of %d' % (k, l))
             yield ig
+
+    def add_mesurement(self, row, col, f, name, value):
+        self.files.loc[(self.files['row'] == row) & (self.files['col'] == col) & (self.files['f'] == f), name] = value
+
+    def save_render(self, row, col, fid, max_width=50):
+        hoechst, tubulin, pericentrin, edu = self.max_projection(row, col, fid)
+
+        hoechst = exposure.equalize_hist(hoechst)
+        tubulin = exposure.equalize_hist(tubulin)
+        pericentrin = exposure.equalize_hist(pericentrin)
+        hoechst = transform.resize(hoechst, (max_width, max_width))
+        tubulin = transform.resize(tubulin, (max_width, max_width))
+        pericentrin = transform.resize(pericentrin, (max_width, max_width))
+
+        hoechst = color.gray2rgb(hoechst)
+        tubulin = color.gray2rgb(tubulin)
+        pericentrin = color.gray2rgb(pericentrin)
+
+        red_multiplier = [1, 0, 0]
+        green_multiplier = [0, 1, 0]
+        blue_multiplier = [0, 0, 1]
+        out = hoechst * blue_multiplier * 0.6 + tubulin * green_multiplier * 0.2 + pericentrin * red_multiplier * 0.2
+
+        io.imsave('/Volumes/Kidbeat/data/'
+                  'centr-dist(u2os)__2018-11-27T18_08_10-Measurement 1/'
+                  'render/%d-%d-%d.jpg' % (fid, row, col),
+                  out)
 
     def max_projection(self, row, col, f):
         group = self.files[(self.files['row'] == row) & (self.files['col'] == col) & (self.files['f'] == f)]

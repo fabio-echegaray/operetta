@@ -6,6 +6,7 @@ import cv2
 import numpy as np
 import pandas as pd
 import scipy.ndimage as ndi
+import skimage.draw as draw
 import skimage.exposure as exposure
 import skimage.feature as feature
 import skimage.filters as filters
@@ -13,7 +14,6 @@ import skimage.measure as measure
 import skimage.morphology as morphology
 import skimage.segmentation as segmentation
 import skimage.transform as tf
-from shapely.geometry import Point
 from shapely.geometry.polygon import Polygon
 
 logging.basicConfig(level=logging.DEBUG)
@@ -57,6 +57,21 @@ def eng_string(x, format='%s', si=False):
         exp3_text = 'e%s' % exp3
 
     return ('%s' + format + '%s') % (sign, x3, exp3_text)
+
+
+def integral_over_surface(image, polygon):
+    c, r = polygon.boundary.xy
+    rr, cc = draw.polygon(r, c)
+
+    # import matplotlib.pyplot as plt
+    # f1 = plt.figure(10)
+    # f1.gca().imshow(image)
+    # f2 = plt.figure(20)
+    # msk = np.zeros(image.shape, dtype=np.uint8)
+    # msk[rr, cc] = 1
+    # f2.gca().imshow(msk)
+    # plt.show(block=False)
+    return np.sum(image[rr, cc])
 
 
 def nuclei_segmentation(image, radius=30):
@@ -129,7 +144,7 @@ def nuclei_features(image, ax=None, area_thresh=100):
             contr[:, 0] *= -1
             _list.append({
                 'id': k,
-                'boundary': contr
+                'boundary': Polygon(contr)
             })
             if ax is not None:
                 ax.plot(contr[:, 1], contr[:, 0], linewidth=1)
@@ -138,8 +153,8 @@ def nuclei_features(image, ax=None, area_thresh=100):
 
 
 def centrosomes(image, max_sigma=1):
-    # blobs_log = feature.blob_log(image,min_sigma=0.05, max_sigma=max_sigma, num_sigma=10, threshold=.1)
-    blobs_log = feature.blob_doh(image, min_sigma=0.05, max_sigma=max_sigma, num_sigma=10, threshold=.1)
+    blobs_log = feature.blob_log(image, min_sigma=0.05, max_sigma=max_sigma, num_sigma=10, threshold=.017)
+    # blobs_log = feature.blob_doh(image, min_sigma=0.05, max_sigma=max_sigma, num_sigma=10, threshold=.1)
     # Compute radii in the 3rd column.
     blobs_log[:, 2] = blobs_log[:, 2] * sqrt(2)
     tform = tf.SimilarityTransform(rotation=math.pi / 2)
@@ -209,39 +224,27 @@ def cell_boundary(tubulin, hoechst, threshold=80, markers=None):
         contour = cnts[0]
 
         boundary = np.array([[x, y] for x, y in [i[0] for i in contour]], dtype=np.float32)
-        boundaries_list.append({'id': l, 'boundary': boundary})
+        boundaries_list.append({'id': l, 'boundary': Polygon(boundary)})
 
     return boundaries_list, gabor_proc
 
 
-def get_nuclei_features(img, nuclei, cell_list, nuclei_list, centrosome_list):
+def is_valid_sample(img, cell_polygon, nuclei_polygon, nuclei_list):
     # check that neither nucleus or cell boundary touch the ends of the frame
     maxw, maxh = img.shape
     frame = Polygon([(0, 0), (0, maxw), (maxh, maxw), (maxh, 0)])
-    nuc = Polygon(nuclei)
-    for cll in cell_list:
-        cell = Polygon(cll['boundary'])
-        if cell.contains(nuc):
-            break
-    if not frame.contains(cell) or not cell.contains(nuc):
-        return False, cell, nuc, None
+    if frame.touches(cell_polygon) or frame.touches(nuclei_polygon):
+        return False
+    if not frame.contains(cell_polygon) or not cell_polygon.contains(nuclei_polygon):
+        return False
 
     # make sure that there's only one nucleus inside cell
     n_nuc = 0
     for ncl in nuclei_list:
-        nuclei = Polygon(ncl['boundary'])
-        if cell.contains(nuclei):
+        nuclei = ncl['boundary']
+        if cell_polygon.contains(nuclei):
             n_nuc += 1
     if n_nuc != 1:
-        return False, cell, nuc, None
+        return False
 
-    # make sure that there's at least one centrosome, but no more than two
-    clist = list()
-    for cen in centrosome_list:
-        cenpt = Point(cen)
-        if cell.contains(cenpt):
-            clist.append(cenpt)
-    if len(clist) == 0 or len(clist) > 2:
-        return False, None, nuc, None
-
-    return True, cell, nuc, clist
+    return True

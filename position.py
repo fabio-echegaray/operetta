@@ -17,6 +17,7 @@ from PyQt4.QtGui import QApplication, QPixmap, QWidget
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from matplotlib.figure import Figure, SubplotParams
 from matplotlib.ticker import EngFormatter
+from shapely.geometry import Point
 from shapely.geometry.polygon import Polygon
 
 import measurements as m
@@ -66,8 +67,8 @@ def canvas_to_pil(canvas):
 
 
 class RenderImagesThread(QThread):
-    def __init__(self, hoechst, edu, pericentrin, tubulin, cell_list, nucleus_list, centrosome_list, largeQLabel,
-                 smallQLabel):
+    def __init__(self, hoechst, edu, pericentrin, tubulin,
+                 largeQLabel, smallQLabel):
         """
         Make a new thread instance with images to render and features
         as parameters.
@@ -81,20 +82,17 @@ class RenderImagesThread(QThread):
         self.edu = edu
         self.pericentrin = pericentrin
         self.tubulin = tubulin
-        self.cells = cell_list
-        self.nuclei = nucleus_list
-        self.centrosomes = centrosome_list
         self.id = -1
         self.nucleus = None
         self.cell = None
-        self.centrosome = None
+        self.centrosomes = None
         self.lqlbl = largeQLabel
         self.sqlbl = smallQLabel
 
     def __del__(self):
         self.wait()
 
-    def setIndividual(self, id, nuc, cll, cntr):
+    def setIndividual(self, id, sample):
         """
         Sets the individual for feature plotting.
 
@@ -106,9 +104,9 @@ class RenderImagesThread(QThread):
         :type cll: list
         """
         self.id = id
-        self.nucleus = nuc
-        self.cell = cll
-        self.centrosome = cntr
+        self.nucleus = sample['nucleus']
+        self.cell = sample['cell']
+        self.centrosomes = sample['centrosomes']
 
     def run(self):
         """
@@ -152,15 +150,21 @@ class RenderImagesThread(QThread):
         ax.set_xlim(cen.x - w / 2, cen.x + w / 2)
         ax.set_ylim(cen.y - h / 2, cen.y + h / 2)
         # plot edu + boundaries
-        ax.imshow(self.edu, cmap='gray')
+        # ax.imshow(self.edu, cmap='gray')
 
         if self.cell is not None:
             x, y = self.cell.exterior.xy
             ax.plot(x, y, color='green', linewidth=1, solid_capstyle='round', zorder=1)
 
-        if self.centrosome is not None:
-            for cn in self.centrosome:
-                c = plt.Circle((cn.x, cn.y), facecolor='none', edgecolor='yellow', linewidth=1, zorder=5)
+        if self.centrosomes is not None:
+            c1, c2 = self.centrosomes
+            if c1 is not None:
+                c = plt.Circle((c1.x, c1.y), radius=5, facecolor='none', edgecolor='r',
+                               linewidth=1, zorder=5)
+                ax.add_artist(c)
+            if c2 is not None:
+                c = plt.Circle((c2.x, c2.y), radius=5, facecolor='none', edgecolor='b',
+                               linewidth=1, zorder=5)
                 ax.add_artist(c)
 
         ax.imshow(self.hoechst, cmap='gray')
@@ -205,7 +209,6 @@ class BrowseGui(QWidget):
     def on_next_button(self):
         logger.info('on_next_button')
         row, col, fid = self.gen.__next__()
-        # row, col, fid = 1, 1, 1000
         logger.debug('fid=%d' % fid)
         self.hoechst, self.tubulin, self.pericentrin, self.edu = self.op.max_projection(row, col, fid)
         self.render_images()
@@ -255,16 +258,16 @@ class ExplorationGui(QWidget):
         self.edu = None
         self.pericentrin = None
         self.tubulin = None
-        # self.resolution = 4.5
-        self.resolution = 1550.3
+        self.resolution = 1550.3e-4
 
         QWidget.__init__(self)
         uic.loadUi('gui_selection.ui', self)
         for l in [self.lblEduMin, self.lblEduMax, self.lblEduAvg, self.lblTubMin, self.lblTubMax, self.lblTubAvg]:
             l.setStyleSheet('color: grey')
 
-        self.current_nuclei_id = 0
+        self.current_sample_id = 0
         self.centrosome_dropped = False
+        self.samples = None
 
         self.prevButton.pressed.connect(self.on_prev_button)
         self.nextButton.pressed.connect(self.on_next_button)
@@ -283,77 +286,102 @@ class ExplorationGui(QWidget):
             return
 
         # self.nuclei_features = m.nuclei_features(imgseg, area_thresh=(r * self.resolution) ** 2 * np.pi)
-        self.nuclei_features = m.nuclei_features(imgseg)
-
-        logger.info('applying centrosome algorithm')
-        self.pericentrin = exposure.equalize_adapthist(self.pericentrin, clip_limit=0.03)
-        self.centrosomes = m.centrosomes(self.pericentrin, max_sigma=self.resolution * 0.2)
-        logger.debug('centrosomes {:s}'.format(str(self.centrosomes)))
+        self.nuclei = m.nuclei_features(imgseg)
+        for i, n in enumerate(self.nuclei):
+            n['id'] = i
 
         logger.info('applying cell boundary algorithm')
         self.cells, _ = m.cell_boundary(self.tubulin, self.hoechst)
 
-        self.renderingThread = RenderImagesThread(self.hoechst, self.edu, self.pericentrin, self.tubulin, self.cells,
-                                                  self.nuclei_features, self.centrosomes, self.imgCell, self.imgEdu)
+        self.build_df()
+
+        self.renderingThread = RenderImagesThread(self.hoechst, self.edu, self.pericentrin, self.tubulin,
+                                                  self.imgCell, self.imgEdu)
         self.renderingThread.finished.connect(self.render_images)
         self.renderingThread.terminated.connect(self.trigger_render)
         self.renderingMutex = QMutex()
-
-        self.build_df()
         self.render_cell()
 
     def build_df(self):
         self.df = pd.DataFrame()
-        for nuc in self.nuclei_features:
-            valid, cell, nuclei, cntrsmes = m.get_nuclei_features(self.hoechst, nuc['boundary'], self.cells,
-                                                                  self.nuclei_features, self.centrosomes)
-            if valid:
-                twocntr = len(cntrsmes) == 2
-                c1 = cntrsmes[0]
-                c2 = cntrsmes[1] if twocntr else None
-                nuc_bnd = nuc['boundary'].astype(np.uint16)
-                c, r = nuc_bnd[:, 0], nuc_bnd[:, 1]
-                r_n, c_n = draw.polygon(r, c)
+        self.samples = list()
 
-                d = pd.DataFrame(data={'id_n': [nuc['id']],
-                                       'dna': [self.hoechst[r_n, c_n].mean() * nuclei.area],
-                                       'edu_avg': [self.edu[r_n, c_n].mean()],
-                                       'edu_max': [self.edu[r_n, c_n].max()],
+        for nuclei in self.nuclei:
+            x0, y0, xf, yf = [int(u) for u in nuclei['boundary'].bounds]
+
+            # search for closest cell boundary based on centroids
+            cells = list()
+            for cl in self.cells:
+                cells.append({'id': cl['id'],
+                              'boundary': cl['boundary'],
+                              'd': cl['boundary'].centroid.distance(nuclei['boundary'].centroid)})
+            cells = sorted(cells, key=lambda k: k['d'])
+
+            if m.is_valid_sample(self.hoechst, cells[0]['boundary'], nuclei['boundary'], self.nuclei):
+                pericentrin_crop = self.pericentrin[y0:yf, x0:xf]
+                logger.info('applying centrosome algorithm for nuclei %d' % nuclei['id'])
+                # self.pericentrin = exposure.equalize_adapthist(pcrop, clip_limit=0.03)
+                cntr = m.centrosomes(pericentrin_crop, max_sigma=self.resolution * 0.5)
+                cntr[:, 0] += x0
+                cntr[:, 1] += y0
+                cntrsmes = list()
+                for k, c in enumerate(cntr):
+                    pt = Point(c[0], c[1])
+                    pti = m.integral_over_surface(self.pericentrin, pt.buffer(self.resolution * 1))
+                    cntrsmes.append({'id': k, 'pt': pt, 'i': pti})
+                    cntrsmes = sorted(cntrsmes, key=lambda k: k['i'], reverse=True)
+
+                logger.debug('centrosomes {:s}'.format(str(cntrsmes)))
+
+                edu_int = m.integral_over_surface(self.edu, nuclei['boundary'])
+                dna_int = m.integral_over_surface(self.hoechst, nuclei['boundary'])
+
+                twocntr = len(cntrsmes) >= 2 and cntrsmes[1]['i'] > 900
+                c1 = cntrsmes[0]['pt']
+                c2 = cntrsmes[1]['pt'] if twocntr else None
+
+                nucb = nuclei['boundary']
+                cllb = cells[0]['boundary']
+                d = pd.DataFrame(data={'id': [nuclei['id']],
+                                       'dna_int': [dna_int],
+                                       'edu_int': [edu_int],
                                        'centrosomes': [len(cntrsmes)],
-                                       'c1_d_nuc_centr': [nuclei.centroid.distance(c1)],
-                                       'c2_d_nuc_centr': [nuclei.centroid.distance(c2) if twocntr else np.nan],
-                                       'c1_d_nuc_bound': [nuclei.exterior.distance(c1)],
-                                       'c2_d_nuc_bound': [nuclei.exterior.distance(c2) if twocntr else np.nan],
-                                       'c1_d_cell_centr': [cell.centroid.distance(c1)],
-                                       'c2_d_cell_centr': [cell.centroid.distance(c2) if twocntr else np.nan],
-                                       'c1_d_cell_bound': [cell.exterior.distance(c1)],
-                                       'c2_d_cell_bound': [cell.exterior.distance(c2) if twocntr else np.nan],
+                                       'c1_d_nuc_centr': [nucb.centroid.distance(c1)],
+                                       'c2_d_nuc_centr': [nucb.centroid.distance(c2) if twocntr else np.nan],
+                                       'c1_d_nuc_bound': [nucb.exterior.distance(c1)],
+                                       'c2_d_nuc_bound': [nucb.exterior.distance(c2) if twocntr else np.nan],
+                                       'c1_d_cell_centr': [cllb.centroid.distance(c1)],
+                                       'c2_d_cell_centr': [cllb.centroid.distance(c2) if twocntr else np.nan],
+                                       'c1_d_cell_bound': [cllb.exterior.distance(c1)],
+                                       'c2_d_cell_bound': [cllb.exterior.distance(c2) if twocntr else np.nan],
                                        })
                 self.df = self.df.append(d, ignore_index=True)
+                self.samples.append({'id': nuclei['id'], 'cell': cells[0]['boundary'], 'nucleus': nuclei['boundary'],
+                                     'centrosomes': [c1, c2]})
+        print(self.df)
 
     def render_cell(self):
         logger.info('render_cell')
-        logger.debug('self.current_nuclei_id: %d' % self.current_nuclei_id)
+        logger.debug('self.current_sample_id: %d' % self.current_sample_id)
+        if len(self.samples) == 0:
+            raise Exception('no samples to show!')
 
-        nuc_f = self.nuclei_features[self.current_nuclei_id]
-        nuc_bnd = nuc_f['boundary']
-
-        valid, cell, nucleus, cntrsmes = m.get_nuclei_features(self.hoechst, nuc_bnd, self.cells, self.nuclei_features,
-                                                               self.centrosomes)
-        logger.debug('{} {} {} {}'.format(valid, cell, nucleus, cntrsmes))
+        sample = [s for s in self.samples if s['id'] == self.current_sample_id][0]
+        cell = sample['cell']
+        nucleus = sample['nucleus']
 
         self.renderingMutex.lock()
         if self.renderingThread.isRunning():
             logger.debug('terminating rendering thread')
             self.renderingThread.quit()
         else:
-            self.renderingThread.setIndividual(self.current_nuclei_id, nucleus, cell, cntrsmes)
+            self.renderingThread.setIndividual(self.current_sample_id, sample)
             self.trigger_render()
         self.renderingMutex.unlock()
 
-        c, r = nuc_bnd[:, 0], nuc_bnd[:, 1]
+        c, r = nucleus.boundary.xy
         r_n, c_n = draw.polygon(r, c)
-        logger.debug('feat id: %d' % nuc_f['id'])
+        logger.debug('feat id: %d' % sample['id'])
 
         self.mplEduHist.hide()
         self.imgEdu.clear()
@@ -367,9 +395,9 @@ class ExplorationGui(QWidget):
         self.lblTubMin.setText('min ' + m.eng_string(self.tubulin[r_n, c_n].min(), format='%0.1f', si=True))
         self.lblTubMax.setText('max ' + m.eng_string(self.tubulin[r_n, c_n].max(), format='%0.1f', si=True))
         self.lblTubAvg.setText('avg ' + m.eng_string(self.tubulin[r_n, c_n].mean(), format='%0.1f', si=True))
-        self.lblCentr_n.setText('%d' % (len(cntrsmes) if cntrsmes is not None else 0))
-        self.lblId.setText('id %d' % nuc_f['id'])
-        self.lblOK.setText('OK' if valid else 'no OK')
+        self.lblCentr_n.setText('%d' % len([s for s in sample['centrosomes'] if s is not None]))
+        self.lblId.setText('id %d' % sample['id'])
+        # self.lblOK.setText('OK' if valid else 'no OK')
 
         fig = Figure((self.imgCentrCloseup.width() / mydpi, self.imgCentrCloseup.height() / mydpi), subplotpars=sp,
                      dpi=mydpi)
@@ -378,33 +406,28 @@ class ExplorationGui(QWidget):
         ax.set_aspect('equal')
         ax.set_axis_off()
         l, b, w, h = fig.bbox.bounds
-        if valid:
-            c1 = cntrsmes[0]
-            self.lblDist_nc.setText('%0.2f' % nucleus.centroid.distance(c1))
-            self.lblDist_nb.setText('%0.2f' % nucleus.exterior.distance(c1))
-            self.lblDist_cc.setText('%0.2f' % cell.centroid.distance(c1))
-            self.lblDist_cb.setText('%0.2f' % cell.exterior.distance(c1))
 
-            ax.imshow(self.pericentrin, cmap='gray')
-            for cn in cntrsmes:
-                c = plt.Circle((cn.x, cn.y), radius=10, facecolor='none', edgecolor='yellow',
-                               linestyle='--', linewidth=1, zorder=5)
-                ax.add_artist(c)
+        c1, c2 = sample['centrosomes']
+        self.lblDist_nc.setText('%0.2f' % nucleus.centroid.distance(c1))
+        self.lblDist_nb.setText('%0.2f' % nucleus.exterior.distance(c1))
+        self.lblDist_cc.setText('%0.2f' % cell.centroid.distance(c1))
+        self.lblDist_cb.setText('%0.2f' % cell.exterior.distance(c1))
 
-            c1 = cntrsmes[0]
-            ax.set_xlim(c1.x - w / 8, c1.x + w / 8)
-            ax.set_ylim(c1.y - h / 8, c1.y + h / 8)
+        ax.imshow(self.pericentrin, cmap='gray')
+        if c1 is not None:
+            c = plt.Circle((c1.x, c1.y), radius=5, facecolor='none', edgecolor='r',
+                           linestyle='--', linewidth=1, zorder=5)
+            ax.add_artist(c)
+        if c2 is not None:
+            c = plt.Circle((c2.x, c2.y), radius=5, facecolor='none', edgecolor='b',
+                           linestyle='--', linewidth=1, zorder=5)
+            ax.add_artist(c)
 
-            qimg_closeup = ImageQt(canvas_to_pil(canvas))
-            self.imgCentrCloseup.setPixmap(QPixmap.fromImage(qimg_closeup))
-        else:
-            self.lblDist_nc.setText('-')
-            self.lblDist_nb.setText('-')
-            self.lblDist_cc.setText('-')
-            self.lblDist_cb.setText('-')
+        ax.set_xlim(c1.x - w / 8, c1.x + w / 8)
+        ax.set_ylim(c1.y - h / 8, c1.y + h / 8)
 
-            qimg_closeup = ImageQt(Image.new('RGB', (int(w), int(h))))
-            self.imgCentrCloseup.setPixmap(QPixmap.fromImage(qimg_closeup))
+        qimg_closeup = ImageQt(canvas_to_pil(canvas))
+        self.imgCentrCloseup.setPixmap(QPixmap.fromImage(qimg_closeup))
         self.update()
 
     @QtCore.pyqtSlot()
@@ -413,9 +436,9 @@ class ExplorationGui(QWidget):
 
     @QtCore.pyqtSlot()
     def render_images(self):
-        if self.current_nuclei_id != self.renderingThread.id:
+        if self.current_sample_id != self.renderingThread.id:
             logger.info('rendering thread finished but for a different id! self %d thread %d' % (
-                self.current_nuclei_id, self.renderingThread.id))
+                self.current_sample_id, self.renderingThread.id))
 
             self.render_cell()
             return
@@ -426,9 +449,9 @@ class ExplorationGui(QWidget):
             self.imgPericentrin.setPixmap(QPixmap.fromImage(self.renderingThread.qimg_peri))
             self.imgTubulin.setPixmap(QPixmap.fromImage(self.renderingThread.qimg_tubulin))
 
-            nuc_f = self.nuclei_features[self.current_nuclei_id]
-            nuc_bnd = nuc_f['boundary']
-            c, r = nuc_bnd[:, 0], nuc_bnd[:, 1]
+            sample = [s for s in self.samples if s['id'] == self.current_sample_id][0]
+            nucleus = sample['nucleus']
+            c, r = nucleus.boundary.xy
             r_n, c_n = draw.polygon(r, c)
 
             self.mplEduHist.clear()
@@ -446,7 +469,7 @@ class ExplorationGui(QWidget):
         ax = f.gca()
         ax.set_aspect('equal')
         ax.imshow(self.hoechst, origin='lower')
-        for nuc_feat in self.nuclei_features:
+        for nuc_feat in self.nuclei:
             nuc_bnd = nuc_feat['boundary']
             nuc = Polygon(nuc_bnd)
             x, y = nuc.exterior.xy
@@ -497,7 +520,7 @@ class ExplorationGui(QWidget):
     def on_prev_button(self):
         logger.info('on_prev_button')
         # self.prevButton.setEnabled(False)
-        self.current_nuclei_id = (self.current_nuclei_id - 1) % len(self.nuclei_features)
+        self.current_sample_id = (self.current_sample_id - 1) % len(self.samples)
         self.render_cell()
         # self.prevButton.setEnabled(True)
 
@@ -505,30 +528,37 @@ class ExplorationGui(QWidget):
     def on_next_button(self):
         logger.info('on_next_button')
         # self.nextButton.setEnabled(False)
-        self.current_nuclei_id = (self.current_nuclei_id + 1) % len(self.nuclei_features)
+        self.current_sample_id = (self.current_sample_id + 1) % len(self.samples)
+        print(self.current_sample_id)
         self.render_cell()
         # self.nextButton.setEnabled(True)
 
 
 if __name__ == '__main__':
-    b_path = '/Volumes/Unbreakable/data/operetta/u2os__2018-10-26T17_55_11-Measurement 4/Images'
+    b_path = '/Volumes/Kidbeat/data/centr-dist(u2os)__2018-11-27T18_08_10-Measurement 1/Images'
 
     operetta = o.Montage(b_path)
+
+    # for row, col, fid in operetta.stack_generator():
+    #     logger.info('%d %d %d' % (row, col, fid))
+    #     operetta.save_render(row, col, fid,max_width=300)
 
     # logger.info('applying nuclei algorithm')
     # outdf = pd.DataFrame()
     # for row, col, fid in operetta.stack_generator():
     #     logger.info('%d %d %d' % (row, col, fid))
     #     hoechst, tubulin, pericentrin, edu = operetta.max_projection(row, col, fid)
-    #     r = 6  # [um]
-    #     resolution = 1550.3
+    #     r = 30  # [um]
+    #     resolution = 1550.3e-4
     #     imgseg, props = m.nuclei_segmentation(hoechst, radius=r * resolution)
     #     # nuclei_features = m.nuclei_features(imgseg, area_thresh=(r * resolution) ** 2 * np.pi)
+    #     operetta.add_mesurement(row, col, fid, 'nuclei found', len(np.unique(imgseg)))
     #     if len(props) > 0:
     #         # interested = props[(props['eccentricity'] > 0.6)].index
     #         outdf = outdf.append(props)
     # pd.to_pickle(outdf, 'out/nuclei.pandas')
-
+    # operetta.files.to_csv('out/operetta.csv')
+    #
     # outdf = pd.read_pickle('out/nuclei.pandas')
     # outdf = outdf[outdf['area'] < 1e4]
     # sns.scatterplot('area', 'mean_intensity', data=outdf)
