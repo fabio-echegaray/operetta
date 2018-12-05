@@ -66,6 +66,72 @@ def canvas_to_pil(canvas):
     return im
 
 
+def measure(hoechst, pericentrin, edu, nuclei, cells, resolution):
+    out = list()
+    df = pd.DataFrame()
+    for nucleus in nuclei:
+        x0, y0, xf, yf = [int(u) for u in nucleus['boundary'].bounds]
+
+        # search for closest cell boundary based on centroids
+        clls = list()
+        for cl in cells:
+            clls.append({'id': cl['id'],
+                         'boundary': cl['boundary'],
+                         'd': cl['boundary'].centroid.distance(nucleus['boundary'].centroid)})
+        clls = sorted(clls, key=lambda k: k['d'])
+
+        if m.is_valid_sample(hoechst, clls[0]['boundary'], nucleus['boundary'], nuclei):
+            pericentrin_crop = pericentrin[y0:yf, x0:xf]
+            logger.info('applying centrosome algorithm for nuclei %d' % nucleus['id'])
+            # self.pericentrin = exposure.equalize_adapthist(pcrop, clip_limit=0.03)
+            cntr = m.centrosomes(pericentrin_crop, max_sigma=resolution * 0.5)
+            cntr[:, 0] += x0
+            cntr[:, 1] += y0
+            cntrsmes = list()
+            for k, c in enumerate(cntr):
+                pt = Point(c[0], c[1])
+                pti = m.integral_over_surface(pericentrin, pt.buffer(resolution * 1))
+                cntrsmes.append({'id': k, 'pt': pt, 'i': pti})
+                cntrsmes = sorted(cntrsmes, key=lambda k: k['i'], reverse=True)
+
+            logger.debug('centrosomes {:s}'.format(str(cntrsmes)))
+
+            edu_int = m.integral_over_surface(edu, nucleus['boundary'])
+            dna_int = m.integral_over_surface(hoechst, nucleus['boundary'])
+
+            twocntr = len(cntrsmes) >= 2
+            c1 = cntrsmes[0] if len(cntrsmes) > 0 else None
+            c2 = cntrsmes[1] if twocntr else None
+
+            nucb = nucleus['boundary']
+            cllb = clls[0]['boundary']
+
+            lc = 2 if c2 is not None else 1
+            d = pd.DataFrame(data={'id': [nucleus['id']],
+                                   'dna_int': [dna_int],
+                                   'edu_int': [edu_int],
+                                   'centrosomes': [lc],
+                                   'c1_int': [c1['i'] if c1 is not None else np.nan],
+                                   'c2_int': [c2['i'] if c2 is not None else np.nan],
+                                   'c1_d_nuc_centr': [nucb.centroid.distance(c1['pt']) if c1 is not None else np.nan],
+                                   'c2_d_nuc_centr': [nucb.centroid.distance(c2['pt']) if twocntr else np.nan],
+                                   'c1_d_nuc_bound': [nucb.exterior.distance(c1['pt']) if c1 is not None else np.nan],
+                                   'c2_d_nuc_bound': [nucb.exterior.distance(c2['pt']) if twocntr else np.nan],
+                                   'c1_d_cell_centr': [cllb.centroid.distance(c1['pt']) if c1 is not None else np.nan],
+                                   'c2_d_cell_centr': [cllb.centroid.distance(c2['pt']) if twocntr else np.nan],
+                                   'c1_d_cell_bound': [cllb.exterior.distance(c1['pt']) if c1 is not None else np.nan],
+                                   'c2_d_cell_bound': [cllb.exterior.distance(c2['pt']) if twocntr else np.nan],
+                                   'c1_d_c2': [c1['pt'].distance(c2['pt']) if twocntr else np.nan],
+                                   'cell': cllb.wkb,
+                                   'nucleus': nucb.wkb
+                                   })
+            df = df.append(d, ignore_index=True, sort=False)
+
+            out.append({'id': nucleus['id'], 'cell': cllb, 'nucleus': nucb,
+                        'centrosomes': [c1, c2], 'edu_int': edu_int, 'dna_int': dna_int})
+    return out, df
+
+
 class RenderImagesThread(QThread):
     def __init__(self, hoechst, edu, pericentrin, tubulin,
                  largeQLabel, smallQLabel):
@@ -293,7 +359,8 @@ class ExplorationGui(QWidget):
         logger.info('applying cell boundary algorithm')
         self.cells, _ = m.cell_boundary(self.tubulin, self.hoechst)
 
-        self.build_df()
+        self.samples, self.df = measure(self.hoechst, self.pericentrin, self.edu, self.nuclei, self.cells,
+                                        self.resolution)
 
         self.renderingThread = RenderImagesThread(self.hoechst, self.edu, self.pericentrin, self.tubulin,
                                                   self.imgCell, self.imgEdu)
@@ -301,64 +368,6 @@ class ExplorationGui(QWidget):
         self.renderingThread.terminated.connect(self.trigger_render)
         self.renderingMutex = QMutex()
         self.render_cell()
-
-    def build_df(self):
-        self.df = pd.DataFrame()
-        self.samples = list()
-
-        for nuclei in self.nuclei:
-            x0, y0, xf, yf = [int(u) for u in nuclei['boundary'].bounds]
-
-            # search for closest cell boundary based on centroids
-            cells = list()
-            for cl in self.cells:
-                cells.append({'id': cl['id'],
-                              'boundary': cl['boundary'],
-                              'd': cl['boundary'].centroid.distance(nuclei['boundary'].centroid)})
-            cells = sorted(cells, key=lambda k: k['d'])
-
-            if m.is_valid_sample(self.hoechst, cells[0]['boundary'], nuclei['boundary'], self.nuclei):
-                pericentrin_crop = self.pericentrin[y0:yf, x0:xf]
-                logger.info('applying centrosome algorithm for nuclei %d' % nuclei['id'])
-                # self.pericentrin = exposure.equalize_adapthist(pcrop, clip_limit=0.03)
-                cntr = m.centrosomes(pericentrin_crop, max_sigma=self.resolution * 0.5)
-                cntr[:, 0] += x0
-                cntr[:, 1] += y0
-                cntrsmes = list()
-                for k, c in enumerate(cntr):
-                    pt = Point(c[0], c[1])
-                    pti = m.integral_over_surface(self.pericentrin, pt.buffer(self.resolution * 1))
-                    cntrsmes.append({'id': k, 'pt': pt, 'i': pti})
-                    cntrsmes = sorted(cntrsmes, key=lambda k: k['i'], reverse=True)
-
-                logger.debug('centrosomes {:s}'.format(str(cntrsmes)))
-
-                edu_int = m.integral_over_surface(self.edu, nuclei['boundary'])
-                dna_int = m.integral_over_surface(self.hoechst, nuclei['boundary'])
-
-                twocntr = len(cntrsmes) >= 2 and cntrsmes[1]['i'] > 900
-                c1 = cntrsmes[0]['pt']
-                c2 = cntrsmes[1]['pt'] if twocntr else None
-
-                nucb = nuclei['boundary']
-                cllb = cells[0]['boundary']
-                d = pd.DataFrame(data={'id': [nuclei['id']],
-                                       'dna_int': [dna_int],
-                                       'edu_int': [edu_int],
-                                       'centrosomes': [len(cntrsmes)],
-                                       'c1_d_nuc_centr': [nucb.centroid.distance(c1)],
-                                       'c2_d_nuc_centr': [nucb.centroid.distance(c2) if twocntr else np.nan],
-                                       'c1_d_nuc_bound': [nucb.exterior.distance(c1)],
-                                       'c2_d_nuc_bound': [nucb.exterior.distance(c2) if twocntr else np.nan],
-                                       'c1_d_cell_centr': [cllb.centroid.distance(c1)],
-                                       'c2_d_cell_centr': [cllb.centroid.distance(c2) if twocntr else np.nan],
-                                       'c1_d_cell_bound': [cllb.exterior.distance(c1)],
-                                       'c2_d_cell_bound': [cllb.exterior.distance(c2) if twocntr else np.nan],
-                                       })
-                self.df = self.df.append(d, ignore_index=True)
-                self.samples.append({'id': nuclei['id'], 'cell': cells[0]['boundary'], 'nucleus': nuclei['boundary'],
-                                     'centrosomes': [c1, c2]})
-        print(self.df)
 
     def render_cell(self):
         logger.info('render_cell')
@@ -529,42 +538,68 @@ class ExplorationGui(QWidget):
         logger.info('on_next_button')
         # self.nextButton.setEnabled(False)
         self.current_sample_id = (self.current_sample_id + 1) % len(self.samples)
-        print(self.current_sample_id)
         self.render_cell()
         # self.nextButton.setEnabled(True)
 
 
+def batch_process_operetta_folder(path):
+    operetta = o.Montage(path)
+    outdf = pd.DataFrame()
+    for row, col, fid in operetta.stack_generator():
+        logger.info('%d %d %d' % (row, col, fid))
+        #     operetta.save_render(row, col, fid,max_width=300)
+        hoechst, tubulin, pericentrin, edu = operetta.max_projection(row, col, fid)
+        r = 30  # [um]
+        resolution = 1550.3e-4
+        imgseg, props = m.nuclei_segmentation(hoechst, radius=r * resolution)
+        operetta.add_mesurement(row, col, fid, 'nuclei found', len(np.unique(imgseg)))
+
+        if len(props) > 0:
+            outdf = outdf.append(props)
+
+            # self.nuclei_features = m.nuclei_features(imgseg, area_thresh=(r * self.resolution) ** 2 * np.pi)
+            nuclei = m.nuclei_features(imgseg)
+            for i, n in enumerate(nuclei):
+                n['id'] = i
+
+            cells, _ = m.cell_boundary(tubulin, hoechst)
+
+            samples, df = measure(hoechst, pericentrin, edu, nuclei, cells, resolution)
+            df['fid'] = fid
+            df['row'] = row
+            df['col'] = col
+            outdf = outdf.append(df, ignore_index=True, sort=False)
+
+    pd.to_pickle(outdf, 'out/nuclei.pandas')
+    operetta.files.to_csv('out/operetta.csv')
+    return outdf
+
+
 if __name__ == '__main__':
     b_path = '/Volumes/Kidbeat/data/centr-dist(u2os)__2018-11-27T18_08_10-Measurement 1/Images'
+    # df = batch_process_operetta_folder(b_path)
+    df = pd.read_pickle('out/nuclei.pandas')
 
-    operetta = o.Montage(b_path)
-
-    # for row, col, fid in operetta.stack_generator():
-    #     logger.info('%d %d %d' % (row, col, fid))
-    #     operetta.save_render(row, col, fid,max_width=300)
-
-    # logger.info('applying nuclei algorithm')
-    # outdf = pd.DataFrame()
-    # for row, col, fid in operetta.stack_generator():
-    #     logger.info('%d %d %d' % (row, col, fid))
-    #     hoechst, tubulin, pericentrin, edu = operetta.max_projection(row, col, fid)
-    #     r = 30  # [um]
-    #     resolution = 1550.3e-4
-    #     imgseg, props = m.nuclei_segmentation(hoechst, radius=r * resolution)
-    #     # nuclei_features = m.nuclei_features(imgseg, area_thresh=(r * resolution) ** 2 * np.pi)
-    #     operetta.add_mesurement(row, col, fid, 'nuclei found', len(np.unique(imgseg)))
-    #     if len(props) > 0:
-    #         # interested = props[(props['eccentricity'] > 0.6)].index
-    #         outdf = outdf.append(props)
-    # pd.to_pickle(outdf, 'out/nuclei.pandas')
-    # operetta.files.to_csv('out/operetta.csv')
-    #
-    # outdf = pd.read_pickle('out/nuclei.pandas')
+    fig = plt.figure(figsize=(10, 10))
+    ax = fig.gca()
     # outdf = outdf[outdf['area'] < 1e4]
-    # sns.scatterplot('area', 'mean_intensity', data=outdf)
-    # # plt.hist(outdf['mean_intensity'], bins=100,log=True)
-    # # plt.hist(outdf['area'], bins=100, log=True)
-    # plt.show()
+    # sns.scatterplot('dna_int', 'edu_int', c='c1_d_nuc_centr', data=outdf)
+    map = ax.scatter(df['dna_int'], df['edu_int'], c=df['c1_d_nuc_centr'], alpha=1)
+    # plt.hist(outdf['mean_intensity'], bins=100,log=True)
+    # plt.hist(outdf['area'], bins=100, log=True)
+    ax.set_title('distance of the first centrosome with respect to nuleus centroid through cell cycle')
+
+    cbar = fig.colorbar(map)
+    cbar.set_label('distance [um]', rotation=270)
+
+    ax.set_xlabel('dna [AU]')
+    ax.set_ylabel('edu [AU]')
+    formatter = EngFormatter(unit='')
+    ax.xaxis.set_major_formatter(formatter)
+    ax.yaxis.set_major_formatter(formatter)
+
+    fig.savefig('facs-u2os.pdf')
+    plt.show()
 
     base_path = os.path.abspath('%s' % os.getcwd())
     logging.info('Qt version:' + QT_VERSION_STR)
@@ -576,6 +611,7 @@ if __name__ == '__main__':
     app = QApplication(sys.argv)
 
     egui = ExplorationGui()
+    operetta = o.Montage(b_path)
     bgui = BrowseGui(operetta=operetta, exploration_gui=egui)
     # from pycallgraph import PyCallGraph
     # from pycallgraph.output import GraphvizOutput

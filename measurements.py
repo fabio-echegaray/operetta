@@ -224,7 +224,8 @@ def cell_boundary(tubulin, hoechst, threshold=80, markers=None):
         contour = cnts[0]
 
         boundary = np.array([[x, y] for x, y in [i[0] for i in contour]], dtype=np.float32)
-        boundaries_list.append({'id': l, 'boundary': Polygon(boundary)})
+        if len(boundary)>=3:
+            boundaries_list.append({'id': l, 'boundary': Polygon(boundary)})
 
     return boundaries_list, gabor_proc
 
