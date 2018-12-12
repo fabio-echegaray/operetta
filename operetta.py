@@ -69,7 +69,7 @@ class Montage:
         group = self.files.groupby(['row', 'col', 'f'])
         l = len(group)
         for k, (ig, g) in enumerate(group):
-            print('stack generator: retrieving %d of %d' % (k, l))
+            logger.info('stack generator: retrieving %d of %d - row=%d col=%d fid=%d' % (k, l, ig[0], ig[1], ig[2]))
             yield ig
 
     def add_mesurement(self, row, col, f, name, value):
@@ -130,7 +130,8 @@ class Dataframe(Montage):
         samples = self.samples.groupby(['row', 'col', 'fid']).size().reset_index()
         l = len(samples)
         for k, r in samples.iterrows():
-            print('stack generator: retrieving %d of %d - row=%d col=%d fid=%d' % (k, l, r['row'], r['col'], r['fid']))
+            logger.info('stack generator: retrieving %d of %d - row=%d col=%d fid=%d' %
+                        (k, l, r['row'], r['col'], r['fid']))
             yield r['row'], r['col'], r['fid']
 
     def save_render(self, row, col, fid, max_width=50):
@@ -161,10 +162,8 @@ class Dataframe(Montage):
         for id, dfi in smpls.groupby('id'):
             nucleus = shapely.wkt.loads(dfi['nucleus'].values[0])
             cell = shapely.wkt.loads(dfi['cell'].values[0])
-            c1=shapely.wkt.loads(dfi['c1'].values[0])
-            c2=shapely.wkt.loads(dfi['c2'].values[0])
-            c1 = Point((20, 25))
-            c2 = Point((30, 35))
+            c1 = shapely.wkt.loads(dfi['c1'].values[0])
+            c2 = shapely.wkt.loads(dfi['c2'].values[0])
             minx, miny, maxx, maxy = cell.bounds
             ax, fig, canvas = RenderImagesThread.render(nucleus, cell, [c1, c2], width=200, height=200,
                                                         xlim=[minx - 20, maxx + 20], ylim=[miny - 20, maxy + 20])

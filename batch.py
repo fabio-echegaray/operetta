@@ -8,8 +8,6 @@ def batch_process_operetta_folder(path):
     operetta = o.Montage(path)
     outdf = pd.DataFrame()
     for row, col, fid in operetta.stack_generator():
-        logger.info('%d %d %d' % (row, col, fid))
-        #     operetta.save_render(row, col, fid,max_width=300)
         hoechst, tubulin, pericentrin, edu = operetta.max_projection(row, col, fid)
         r = 30  # [um]
         resolution = 1550.3e-4
@@ -40,7 +38,6 @@ def batch_process_operetta_folder(path):
 def batch_render(df_path, images_path):
     operetta = o.Dataframe(df_path, images_path)
     for row, col, fid in operetta.stack_generator():
-        logger.info('%d %d %d' % (row, col, fid))
         operetta.save_render(row, col, fid, max_width=300)
 
 
