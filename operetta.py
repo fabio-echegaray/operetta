@@ -1,3 +1,4 @@
+import logging
 import os
 import re
 
@@ -7,6 +8,22 @@ from skimage import color
 from skimage import transform
 from skimage import exposure
 from skimage import io
+import shapely.wkt
+from shapely.geometry.point import Point
+
+from gui.utils import canvas_to_pil
+from gui.explore import RenderImagesThread
+
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger('hhlab')
+
+
+def ensure_dir(file_path):
+    file_path = os.path.abspath(file_path)
+    directory = os.path.dirname(file_path)
+    if not os.path.exists(directory):
+        os.makedirs(directory)
+    return file_path
 
 
 class Montage:
@@ -72,15 +89,15 @@ class Montage:
         tubulin = color.gray2rgb(tubulin)
         pericentrin = color.gray2rgb(pericentrin)
 
-        red_multiplier = [1, 0, 0]
-        green_multiplier = [0, 1, 0]
-        blue_multiplier = [0, 0, 1]
-        out = hoechst * blue_multiplier * 0.6 + tubulin * green_multiplier * 0.2 + pericentrin * red_multiplier * 0.2
+        alexa_488 = [.29, 1., 0]
+        alexa_594 = [1., .61, 0]
+        alexa_647 = [.83, .28, .28]
+        hoechst_33342 = [0, .57, 1.]
+        out = hoechst * hoechst_33342 + tubulin * alexa_488 + pericentrin * alexa_594 + edu * alexa_647
 
-        io.imsave('/Volumes/Kidbeat/data/'
-                  'centr-dist(u2os)__2018-11-27T18_08_10-Measurement 1/'
-                  'render/%d-%d-%d.jpg' % (fid, row, col),
-                  out)
+        basepath = os.path.dirname(self.dir)
+        path = os.path.abspath(os.path.join(basepath, 'render/%d-%d-%d.jpg' % (fid, row, col)))
+        io.imsave(path, out)
 
     def max_projection(self, row, col, f):
         group = self.files[(self.files['row'] == row) & (self.files['col'] == col) & (self.files['f'] == f)]
@@ -98,3 +115,70 @@ class Montage:
                 max = np.maximum(max, img)
             channels.append(max)
         return channels
+
+
+class Dataframe(Montage):
+    def __init__(self, samples_path, images_path):
+        self.samples = pd.read_pickle(samples_path)
+        if np.any([i not in self.samples for i in ['row', 'col', 'fid']]):
+            is_row, is_col, is_fid = [i not in self.samples for i in ['row', 'col', 'fid']]
+            raise Exception('key columns not in provided dataframe row=%s col=%s fid=%s' % (is_row, is_col, is_fid))
+        self.images_path = images_path
+        self._super_initialized = False
+
+    def stack_generator(self):
+        samples = self.samples.groupby(['row', 'col', 'fid']).size().reset_index()
+        l = len(samples)
+        for k, r in samples.iterrows():
+            print('stack generator: retrieving %d of %d - row=%d col=%d fid=%d' % (k, l, r['row'], r['col'], r['fid']))
+            yield r['row'], r['col'], r['fid']
+
+    def save_render(self, row, col, fid, max_width=50):
+        hoechst, tubulin, pericentrin, edu = self.max_projection(row, col, fid)
+
+        hoechst = exposure.equalize_hist(hoechst)
+        tubulin = exposure.equalize_hist(tubulin)
+        pericentrin = exposure.equalize_hist(pericentrin)
+        edu = exposure.equalize_hist(edu)
+
+        hoechst = color.gray2rgb(hoechst)
+        tubulin = color.gray2rgb(tubulin)
+        pericentrin = color.gray2rgb(pericentrin)
+        edu = color.gray2rgb(edu)
+
+        alexa_488 = [.29, 1., 0]
+        alexa_594 = [1., .61, 0]
+        alexa_647 = [.83, .28, .28]
+        hoechst_33342 = [0, .57, 1.]
+        out = hoechst * hoechst_33342 * 0.25 + \
+              tubulin * alexa_488 * 0.25 + \
+              pericentrin * alexa_594 * 0.25 + \
+              edu * alexa_647 * 0.25
+
+        smpls = self.samples[(self.samples['row'] == row) & (self.samples['col'] == col) & (self.samples['fid'] == fid)]
+
+        basepath = os.path.dirname(self.dir)
+        for id, dfi in smpls.groupby('id'):
+            nucleus = shapely.wkt.loads(dfi['nucleus'].values[0])
+            cell = shapely.wkt.loads(dfi['cell'].values[0])
+            c1=shapely.wkt.loads(dfi['c1'].values[0])
+            c2=shapely.wkt.loads(dfi['c2'].values[0])
+            c1 = Point((20, 25))
+            c2 = Point((30, 35))
+            minx, miny, maxx, maxy = cell.bounds
+            ax, fig, canvas = RenderImagesThread.render(nucleus, cell, [c1, c2], width=200, height=200,
+                                                        xlim=[minx - 20, maxx + 20], ylim=[miny - 20, maxy + 20])
+
+            ax.imshow(out)
+
+            pil = canvas_to_pil(canvas)
+
+            path = os.path.abspath(os.path.join(basepath, 'render/r%d-c%d-f%d-i%d.jpg' % (row, col, fid, id)))
+            pil.save(ensure_dir(path))
+
+    def max_projection(self, row, col, fid):
+        if not self._super_initialized:
+            logger.info('Initializing parent of operetta.Dataframe...')
+            super().__init__(self.images_path)
+            self._super_initialized = True
+        return super().max_projection(row, col, fid)

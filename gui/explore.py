@@ -16,8 +16,8 @@ from shapely.geometry.polygon import Polygon
 from matplotlib.figure import SubplotParams
 
 from . import utils
+from . import SUSSEX_CORAL_RED, SUSSEX_NAVY_BLUE, convert_to, meter, pix, um
 import measurements as m
-import position
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger('hhlab')
@@ -27,7 +27,7 @@ mydpi = 72
 
 class RenderImagesThread(QThread):
     def __init__(self, hoechst, edu, pericentrin, tubulin,
-                 largeQLabel, smallQLabel):
+                 largeQLabel, smallQLabel, pix_per_um=1):
         """
         Make a new thread instance with images to render and features
         as parameters.
@@ -47,6 +47,9 @@ class RenderImagesThread(QThread):
         self.centrosomes = None
         self.lqlbl = largeQLabel
         self.sqlbl = smallQLabel
+        if pix_per_um == 1: logger.warning('no image resolution was set.')
+        self.pix_per_um = pix_per_um
+        self._rendered = False
 
     def __del__(self):
         self.wait()
@@ -66,87 +69,107 @@ class RenderImagesThread(QThread):
         self.nucleus = sample['nucleus']
         self.cell = sample['cell']
         self.centrosomes = sample['centrosomes']
+        self._rendered = False
+
+    @staticmethod
+    def render(nucleus, cell, centrosomes, width=50, height=50, dpi=72, pix_per_um=1, xlim=None, ylim=None):
+
+        # create a matplotlib axis and plot edu image
+        fig = Figure((width / dpi, height / dpi), subplotpars=sp, dpi=dpi)
+        canvas = FigureCanvas(fig)
+        ax = fig.gca()
+        ax.set_aspect('equal')
+        ax.set_axis_off()
+        l, b, w, h = fig.bbox.bounds
+
+        x, y = nucleus.exterior.xy
+        cen = nucleus.centroid
+        ax.plot(x, y, color='red', linewidth=1, solid_capstyle='round', zorder=2)
+        ax.plot(cen.x, cen.y, color='red', marker='+', linewidth=1, solid_capstyle='round', zorder=2)
+
+        if xlim is not None and ylim is not None:
+            ax.set_xlim(xlim)
+            ax.set_ylim(ylim)
+            x0, xf = xlim
+            y0, yf = ylim
+            y0 = max(0, y0) + h / 12
+
+        else:
+            ax.set_xlim(cen.x - w / 2, cen.x + w / 2)
+            ax.set_ylim(cen.y - h / 2, cen.y + h / 2)
+            x0, xf = cen.x - w / 2, cen.x + w / 2
+            y0, yf = cen.y - h / 2, cen.y + h / 2
+            y0 = max(0, y0) + h / 12
+
+        if cell is not None:
+            x, y = cell.exterior.xy
+            ax.plot(x, y, color='green', linewidth=1, solid_capstyle='round', zorder=1)
+            cen = cell.centroid
+            ax.plot(cen.x, cen.y, color='green', marker='+', linewidth=1, solid_capstyle='round', zorder=2)
+
+        if centrosomes is not None:
+            c1, c2 = centrosomes
+            if c1 is not None:
+                c = plt.Circle((c1.x, c1.y), radius=5, facecolor='none', edgecolor=SUSSEX_CORAL_RED,
+                               linewidth=3, zorder=5)
+                ax.add_artist(c)
+            if c2 is not None:
+                c = plt.Circle((c2.x, c2.y), radius=5, facecolor='none', edgecolor=SUSSEX_NAVY_BLUE,
+                               linewidth=3, zorder=5)
+                ax.add_artist(c)
+
+        xw = (xf - x0) / 10
+        x0 += xw
+        print(x0, y0)
+        ax.plot([x0, x0 + 10 * pix_per_um], [y0, y0], c='w', lw=4)
+        ax.text(x0 + 1 * pix_per_um, y0 + 1 * pix_per_um, '10 um', color='w')
+
+        return ax, fig, canvas
 
     def run(self):
         """
         Go over every item in the
         """
+        if not self._rendered:
+            c1 = self.centrosomes[0]['pt']
+            c2 = self.centrosomes[1]['pt']
+            self.ax, self.fig, self.canvas = RenderImagesThread.render(self.nucleus, self.cell, [c1, c2],
+                                                                       width=self.lqlbl.width(),
+                                                                       height=self.lqlbl.height(),
+                                                                       dpi=mydpi, pix_per_um=self.pix_per_um)
 
+        self.ax.imshow(self.hoechst, cmap='gray')
+        self.qimg_hoechst = ImageQt(utils.canvas_to_pil(self.canvas))
+
+        self.ax.imshow(self.pericentrin, cmap='gray')
+        self.qimg_peri = ImageQt(utils.canvas_to_pil(self.canvas))
+
+        self.ax.imshow(self.tubulin, cmap='gray')
+        self.qimg_tubulin = ImageQt(utils.canvas_to_pil(self.canvas))
+
+        self.ax.imshow(self.edu, cmap='gray')
+        self.fig.set_size_inches((self.sqlbl.width() / mydpi, self.sqlbl.height() / mydpi))
+        l, b, w, h = self.fig.bbox.bounds
         cen = self.nucleus.centroid
+        self.ax.set_xlim(cen.x - w / 2, cen.x + w / 2)
+        self.ax.set_ylim(cen.y - h / 2, cen.y + h / 2)
+        self.qimg_edu = ImageQt(utils.canvas_to_pil(self.canvas))
 
-        # create a matplotlib axis and plot edu image
-        fig = Figure((self.sqlbl.width() / mydpi, self.sqlbl.height() / mydpi), subplotpars=sp, dpi=mydpi)
-        canvas = FigureCanvas(fig)
-        ax = fig.gca()
-        ax.set_aspect('equal')
-        ax.set_axis_off()
-        l, b, w, h = fig.bbox.bounds
-
-        ax.plot(cen.x, cen.y, color='red', marker='+', linewidth=1, solid_capstyle='round', zorder=2)
-
-        x, y = self.nucleus.exterior.xy
-        ax.plot(x, y, color='red', linewidth=1, solid_capstyle='round', zorder=2)
-
-        ax.set_xlim(cen.x - w / 2, cen.x + w / 2)
-        ax.set_ylim(cen.y - h / 2, cen.y + h / 2)
-        # plot edu + boundaries
-        ax.imshow(self.edu, cmap='gray')
-
-        self.qimg_edu = ImageQt(utils.utils.canvas_to_pil(canvas))
-
-        # plot rest of features
-        fig = Figure((self.lqlbl.width() / mydpi, self.lqlbl.height() / mydpi), subplotpars=sp, dpi=mydpi)
-        canvas = FigureCanvas(fig)
-        ax = fig.gca()
-        ax.set_aspect('equal')
-        ax.set_axis_off()
-        l, b, w, h = fig.bbox.bounds
-
-        x, y = self.nucleus.exterior.xy
-        ax.plot(x, y, color='red', linewidth=1, solid_capstyle='round', zorder=2)
-        ax.plot(cen.x, cen.y, color='red', marker='+', linewidth=1, solid_capstyle='round', zorder=2)
-
-        ax.set_xlim(cen.x - w / 2, cen.x + w / 2)
-        ax.set_ylim(cen.y - h / 2, cen.y + h / 2)
-        # plot edu + boundaries
-        # ax.imshow(self.edu, cmap='gray')
-
-        if self.cell is not None:
-            x, y = self.cell.exterior.xy
-            ax.plot(x, y, color='green', linewidth=1, solid_capstyle='round', zorder=1)
-
-        if self.centrosomes is not None:
-            c1, c2 = self.centrosomes
-            if c1 is not None:
-                c = plt.Circle((c1.x, c1.y), radius=5, facecolor='none', edgecolor='r',
-                               linewidth=1, zorder=5)
-                ax.add_artist(c)
-            if c2 is not None:
-                c = plt.Circle((c2.x, c2.y), radius=5, facecolor='none', edgecolor='b',
-                               linewidth=1, zorder=5)
-                ax.add_artist(c)
-
-        ax.imshow(self.hoechst, cmap='gray')
-        self.qimg_hoechst = ImageQt(utils.utils.canvas_to_pil(canvas))
-
-        ax.imshow(self.pericentrin, cmap='gray')
-        self.qimg_peri = ImageQt(utils.canvas_to_pil(canvas))
-
-        ax.imshow(self.tubulin, cmap='gray')
-        self.qimg_tubulin = ImageQt(utils.canvas_to_pil(canvas))
+        self._rendered = True
 
 
 class ExplorationGui(QWidget):
     def __init__(self):
-
         self.hoechst = None
         self.edu = None
         self.pericentrin = None
         self.tubulin = None
-        self.resolution = 1550.3e-4
+        self.um_per_pix = convert_to(1.8983367649421008E-07 * meter / pix, um / pix).n()
+        self.pix_per_um = 1 / self.um_per_pix
+        self.pix_per_um = float(self.pix_per_um.args[0])
 
         QWidget.__init__(self)
-        uic.loadUi('gui_selection.ui', self)
+        uic.loadUi('gui/gui_selection.ui', self)
         for l in [self.lblEduMin, self.lblEduMax, self.lblEduAvg, self.lblTubMin, self.lblTubMax, self.lblTubAvg]:
             l.setStyleSheet('color: grey')
 
@@ -164,7 +187,7 @@ class ExplorationGui(QWidget):
 
         logger.info('applying nuclei algorithm')
         r = 6  # [um]
-        imgseg, props = m.nuclei_segmentation(self.hoechst, radius=r * self.resolution)
+        imgseg, props = m.nuclei_segmentation(self.hoechst, radius=r * self.pix_per_um)
 
         if len(props) == 0:
             logger.info('found no nuclear features on the hoechst image.')
@@ -178,11 +201,12 @@ class ExplorationGui(QWidget):
         logger.info('applying cell boundary algorithm')
         self.cells, _ = m.cell_boundary(self.tubulin, self.hoechst)
 
-        self.samples, self.df = position.measure(self.hoechst, self.pericentrin, self.edu, self.nuclei, self.cells,
-                                        self.resolution)
+        self.samples, self.df = m.measure_into_dataframe(self.hoechst, self.pericentrin, self.edu, self.nuclei,
+                                                         self.cells,
+                                                         self.pix_per_um)
 
         self.renderingThread = RenderImagesThread(self.hoechst, self.edu, self.pericentrin, self.tubulin,
-                                                  self.imgCell, self.imgEdu)
+                                                  self.imgCell, self.imgEdu, pix_per_um=self.pix_per_um)
         self.renderingThread.finished.connect(self.render_images)
         self.renderingThread.terminated.connect(self.trigger_render)
         self.renderingMutex = QMutex()
@@ -235,7 +259,8 @@ class ExplorationGui(QWidget):
         ax.set_axis_off()
         l, b, w, h = fig.bbox.bounds
 
-        c1, c2 = sample['centrosomes']
+        c1 = sample['centrosomes'][0]['pt']
+        c2 = sample['centrosomes'][1]['pt']
         self.lblDist_nc.setText('%0.2f' % nucleus.centroid.distance(c1))
         self.lblDist_nb.setText('%0.2f' % nucleus.exterior.distance(c1))
         self.lblDist_cc.setText('%0.2f' % cell.centroid.distance(c1))

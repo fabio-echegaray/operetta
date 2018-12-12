@@ -14,6 +14,7 @@ import skimage.measure as measure
 import skimage.morphology as morphology
 import skimage.segmentation as segmentation
 import skimage.transform as tf
+from shapely.geometry.point import Point
 from shapely.geometry.polygon import Polygon
 
 logging.basicConfig(level=logging.DEBUG)
@@ -249,3 +250,73 @@ def is_valid_sample(img, cell_polygon, nuclei_polygon, nuclei_list):
         return False
 
     return True
+
+
+def measure_into_dataframe(hoechst, pericentrin, edu, nuclei, cells, resolution):
+    out = list()
+    df = pd.DataFrame()
+    for nucleus in nuclei:
+        x0, y0, xf, yf = [int(u) for u in nucleus['boundary'].bounds]
+
+        # search for closest cell boundary based on centroids
+        clls = list()
+        for cl in cells:
+            clls.append({'id': cl['id'],
+                         'boundary': cl['boundary'],
+                         'd': cl['boundary'].centroid.distance(nucleus['boundary'].centroid)})
+        clls = sorted(clls, key=lambda k: k['d'])
+
+        if is_valid_sample(hoechst, clls[0]['boundary'], nucleus['boundary'], nuclei):
+            pericentrin_crop = pericentrin[y0:yf, x0:xf]
+            logger.info('applying centrosome algorithm for nuclei %d' % nucleus['id'])
+            # self.pericentrin = exposure.equalize_adapthist(pcrop, clip_limit=0.03)
+            cntr = centrosomes(pericentrin_crop, max_sigma=resolution * 0.5)
+            cntr[:, 0] += x0
+            cntr[:, 1] += y0
+            cntrsmes = list()
+            for k, c in enumerate(cntr):
+                pt = Point(c[0], c[1])
+                pti = integral_over_surface(pericentrin, pt.buffer(resolution * 5))
+                cntrsmes.append({'id': k, 'pt': pt, 'i': pti})
+                cntrsmes = sorted(cntrsmes, key=lambda k: k['i'], reverse=True)
+
+            logger.debug('centrosomes {:s}'.format(str(cntrsmes)))
+
+            edu_int = integral_over_surface(edu, nucleus['boundary'])
+            dna_int = integral_over_surface(hoechst, nucleus['boundary'])
+
+            twocntr = len(cntrsmes) >= 2
+            c1 = cntrsmes[0] if len(cntrsmes) > 0 else None
+            c2 = cntrsmes[1] if twocntr else None
+
+            nucb = nucleus['boundary']
+            cllb = clls[0]['boundary']
+
+            lc = 2 if c2 is not None else 1
+            d = pd.DataFrame(data={'id': [nucleus['id']],
+                                   'dna_int': [dna_int],
+                                   'edu_int': [edu_int],
+                                   'centrosomes': [lc],
+                                   'c1_int': [c1['i'] if c1 is not None else np.nan],
+                                   'c2_int': [c2['i'] if c2 is not None else np.nan],
+                                   'c1_d_nuc_centr': [nucb.centroid.distance(c1['pt']) if c1 is not None else np.nan],
+                                   'c2_d_nuc_centr': [nucb.centroid.distance(c2['pt']) if twocntr else np.nan],
+                                   'c1_d_nuc_bound': [nucb.exterior.distance(c1['pt']) if c1 is not None else np.nan],
+                                   'c2_d_nuc_bound': [nucb.exterior.distance(c2['pt']) if twocntr else np.nan],
+                                   'c1_d_cell_centr': [cllb.centroid.distance(c1['pt']) if c1 is not None else np.nan],
+                                   'c2_d_cell_centr': [cllb.centroid.distance(c2['pt']) if twocntr else np.nan],
+                                   'c1_d_cell_bound': [cllb.exterior.distance(c1['pt']) if c1 is not None else np.nan],
+                                   'c2_d_cell_bound': [cllb.exterior.distance(c2['pt']) if twocntr else np.nan],
+                                   'c1_d_c2': [c1['pt'].distance(c2['pt']) if twocntr else np.nan],
+                                   'cell': cllb.wkt,
+                                   'nucleus': nucb.wkt,
+                                   'c1': c1['pt'].wkt if c1 is not None else None,
+                                   'c2': c2['pt'].wkt if c2 is not None else None,
+                                   })
+            df = df.append(d, ignore_index=True, sort=False)
+
+            out.append({'id': nucleus['id'], 'cell': cllb, 'nucleus': nucb,
+                        'centrosomes': [c1, c2], 'edu_int': edu_int, 'dna_int': dna_int})
+    return out, df
+
+

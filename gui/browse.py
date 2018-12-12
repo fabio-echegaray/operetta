@@ -32,7 +32,7 @@ class BrowseGui(QWidget):
         self.egui = exploration_gui
 
         QWidget.__init__(self)
-        uic.loadUi('gui_browse.ui', self)
+        uic.loadUi('gui/gui_browse.ui', self)
         self.nextButton.pressed.connect(self.on_next_button)
         self.processButton.pressed.connect(self.on_process_button)
 
