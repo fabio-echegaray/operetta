@@ -1,13 +1,6 @@
-import argparse
 import logging
 
-import numpy as np
-import pandas as pd
-
-import measurements as m
-import operetta as o
-
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger('hhlab')
 
 
@@ -52,6 +45,8 @@ def batch_render(df_path, images_path):
 
 
 if __name__ == '__main__':
+    import argparse
+
     parser = argparse.ArgumentParser(description='Process operetta images.')
     parser.add_argument('folder', metavar='F', type=str,
                         help='folder where operetta images reside')
@@ -63,6 +58,18 @@ if __name__ == '__main__':
                         help='measure_into_dataframe features on the dataset')
     args = parser.parse_args()
 
+    import numpy as np
+    import pandas as pd
+
+    import measurements as m
+    import operetta as o
+
+    """
+        MAKE SURE YOU DON'T FORGET TO CALL
+        module load python/intel/3.6.039
+        # virtualenv --python=/mnt/pactsw/python/2.7.12/bin/python ~/py27
+        source ~/py36/bin/activate
+    """
     # df=None
     if args.measure_into_dataframe:
         df = batch_process_operetta_folder(args.folder)
