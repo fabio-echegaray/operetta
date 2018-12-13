@@ -225,7 +225,7 @@ def cell_boundary(tubulin, hoechst, threshold=80, markers=None):
         contour = cnts[0]
 
         boundary = np.array([[x, y] for x, y in [i[0] for i in contour]], dtype=np.float32)
-        if len(boundary)>=3:
+        if len(boundary) >= 3:
             boundaries_list.append({'id': l, 'boundary': Polygon(boundary)})
 
     return boundaries_list, gabor_proc
@@ -252,7 +252,7 @@ def is_valid_sample(img, cell_polygon, nuclei_polygon, nuclei_list):
     return True
 
 
-def measure_into_dataframe(hoechst, pericentrin, edu, nuclei, cells, resolution):
+def measure_into_dataframe(hoechst, pericentrin, edu, tubulin, nuclei, cells, resolution):
     out = list()
     df = pd.DataFrame()
     for nucleus in nuclei:
@@ -282,41 +282,42 @@ def measure_into_dataframe(hoechst, pericentrin, edu, nuclei, cells, resolution)
 
             logger.debug('centrosomes {:s}'.format(str(cntrsmes)))
 
-            edu_int = integral_over_surface(edu, nucleus['boundary'])
-            dna_int = integral_over_surface(hoechst, nucleus['boundary'])
-
             twocntr = len(cntrsmes) >= 2
             c1 = cntrsmes[0] if len(cntrsmes) > 0 else None
             c2 = cntrsmes[1] if twocntr else None
 
-            nucb = nucleus['boundary']
-            cllb = clls[0]['boundary']
+            nucl_bnd = nucleus['boundary']
+            cell_bnd = clls[0]['boundary']
+
+            edu_int = integral_over_surface(edu, nucl_bnd)
+            dna_int = integral_over_surface(hoechst, nucl_bnd)
+            tubulin_int = integral_over_surface(tubulin, cell_bnd)
 
             lc = 2 if c2 is not None else 1
-            d = pd.DataFrame(data={'id': [nucleus['id']],
-                                   'dna_int': [dna_int],
-                                   'edu_int': [edu_int],
-                                   'centrosomes': [lc],
-                                   'c1_int': [c1['i'] if c1 is not None else np.nan],
-                                   'c2_int': [c2['i'] if c2 is not None else np.nan],
-                                   'c1_d_nuc_centr': [nucb.centroid.distance(c1['pt']) if c1 is not None else np.nan],
-                                   'c2_d_nuc_centr': [nucb.centroid.distance(c2['pt']) if twocntr else np.nan],
-                                   'c1_d_nuc_bound': [nucb.exterior.distance(c1['pt']) if c1 is not None else np.nan],
-                                   'c2_d_nuc_bound': [nucb.exterior.distance(c2['pt']) if twocntr else np.nan],
-                                   'c1_d_cell_centr': [cllb.centroid.distance(c1['pt']) if c1 is not None else np.nan],
-                                   'c2_d_cell_centr': [cllb.centroid.distance(c2['pt']) if twocntr else np.nan],
-                                   'c1_d_cell_bound': [cllb.exterior.distance(c1['pt']) if c1 is not None else np.nan],
-                                   'c2_d_cell_bound': [cllb.exterior.distance(c2['pt']) if twocntr else np.nan],
-                                   'c1_d_c2': [c1['pt'].distance(c2['pt']) if twocntr else np.nan],
-                                   'cell': cllb.wkt,
-                                   'nucleus': nucb.wkt,
-                                   'c1': c1['pt'].wkt if c1 is not None else None,
-                                   'c2': c2['pt'].wkt if c2 is not None else None,
-                                   })
+            d = pd.DataFrame(data={
+                'id': [nucleus['id']],
+                'dna_int': [dna_int],
+                'edu_int': [edu_int],
+                'tubulin_int': [tubulin_int],
+                'centrosomes': [lc],
+                'c1_int': [c1['i'] if c1 is not None else np.nan],
+                'c2_int': [c2['i'] if c2 is not None else np.nan],
+                'c1_d_nuc_centr': [nucl_bnd.centroid.distance(c1['pt']) if c1 is not None else np.nan],
+                'c2_d_nuc_centr': [nucl_bnd.centroid.distance(c2['pt']) if twocntr else np.nan],
+                'c1_d_nuc_bound': [nucl_bnd.exterior.distance(c1['pt']) if c1 is not None else np.nan],
+                'c2_d_nuc_bound': [nucl_bnd.exterior.distance(c2['pt']) if twocntr else np.nan],
+                'c1_d_cell_centr': [cell_bnd.centroid.distance(c1['pt']) if c1 is not None else np.nan],
+                'c2_d_cell_centr': [cell_bnd.centroid.distance(c2['pt']) if twocntr else np.nan],
+                'c1_d_cell_bound': [cell_bnd.exterior.distance(c1['pt']) if c1 is not None else np.nan],
+                'c2_d_cell_bound': [cell_bnd.exterior.distance(c2['pt']) if twocntr else np.nan],
+                'c1_d_c2': [c1['pt'].distance(c2['pt']) if twocntr else np.nan],
+                'cell': cell_bnd.wkt,
+                'nucleus': nucl_bnd.wkt,
+                'c1': c1['pt'].wkt if c1 is not None else None,
+                'c2': c2['pt'].wkt if c2 is not None else None,
+            })
             df = df.append(d, ignore_index=True, sort=False)
 
-            out.append({'id': nucleus['id'], 'cell': cllb, 'nucleus': nucb,
+            out.append({'id': nucleus['id'], 'cell': cell_bnd, 'nucleus': nucl_bnd,
                         'centrosomes': [c1, c2], 'edu_int': edu_int, 'dna_int': dna_int})
     return out, df
-
-

@@ -212,9 +212,8 @@ if LOAD_GUI:
             logger.info('applying cell boundary algorithm')
             self.cells, _ = m.cell_boundary(self.tubulin, self.hoechst)
 
-            self.samples, self.df = m.measure_into_dataframe(self.hoechst, self.pericentrin, self.edu, self.nuclei,
-                                                             self.cells,
-                                                             self.pix_per_um)
+            self.samples, self.df = m.measure_into_dataframe(self.hoechst, self.pericentrin, self.edu, self.tubulin,
+                                                             self.nuclei, self.cells, self.pix_per_um)
 
             self.renderingThread = RenderImagesThread(self.hoechst, self.edu, self.pericentrin, self.tubulin,
                                                       self.imgCell, self.imgEdu, pix_per_um=self.pix_per_um)

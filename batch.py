@@ -24,7 +24,7 @@ def batch_process_operetta_folder(path):
 
             cells, _ = m.cell_boundary(tubulin, hoechst)
 
-            samples, df = m.measure_into_dataframe(hoechst, pericentrin, edu, nuclei, cells, resolution)
+            samples, df = m.measure_into_dataframe(hoechst, pericentrin, edu, tubulin, nuclei, cells, resolution)
             df['fid'] = fid
             df['row'] = row
             df['col'] = col
