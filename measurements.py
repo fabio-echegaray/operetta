@@ -16,6 +16,7 @@ import skimage.segmentation as segmentation
 import skimage.transform as tf
 from shapely.geometry.point import Point
 from shapely.geometry.polygon import Polygon
+from shapely import affinity
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger('hhlab')
@@ -64,15 +65,12 @@ def integral_over_surface(image, polygon):
     c, r = polygon.boundary.xy
     rr, cc = draw.polygon(r, c)
 
-    # import matplotlib.pyplot as plt
-    # f1 = plt.figure(10)
-    # f1.gca().imshow(image)
-    # f2 = plt.figure(20)
-    # msk = np.zeros(image.shape, dtype=np.uint8)
-    # msk[rr, cc] = 1
-    # f2.gca().imshow(msk)
-    # plt.show(block=False)
-    return np.sum(image[rr, cc])
+    try:
+        ss = np.sum(image[rr, cc])
+        return ss
+    except Exception:
+        logger.warning('integral_over_surface measured incorrectly')
+        return np.nan
 
 
 def nuclei_segmentation(image, radius=30):
@@ -93,39 +91,7 @@ def nuclei_segmentation(image, radius=30):
     cleared = segmentation.clear_border(thresh)
     label_image = measure.label(cleared)
 
-    logger.info('computing properties')
-    properties = list()
-    indices = list()
-    # TODO: need integral of pixel intensity over surface
-    columns = ('area', 'bbox_area',
-               'centroid_x', 'centroid_u', 'eccentricity', 'equivalent_diameter',
-               'euler_number', 'extent',
-               'max_intensity', 'mean_intensity', 'min_intensity', 'orientation', 'perimeter')
-    for p in measure.regionprops(label_image, intensity_image=image):
-        properties.append([p.area,
-                           # p.bbox,
-                           p.bbox_area,
-                           p.centroid[0],
-                           p.centroid[1],
-                           p.eccentricity,
-                           p.equivalent_diameter,
-                           p.euler_number,
-                           p.extent,
-                           # p.inertia_tensor,
-                           p.max_intensity,
-                           p.mean_intensity,
-                           p.min_intensity,
-                           p.orientation,
-                           p.perimeter,
-                           ])
-        indices.append(p.label)
-    if not len(indices):
-        return label_image, pd.DataFrame([], index=[])
-    else:
-        indices = pd.Index(indices, name='label')
-        properties = pd.DataFrame(properties, index=indices, columns=columns)
-
-        return label_image, properties
+    return label_image
 
 
 def nuclei_features(image, ax=None, area_thresh=100):
@@ -231,30 +197,32 @@ def cell_boundary(tubulin, hoechst, threshold=80, markers=None):
     return boundaries_list, gabor_proc
 
 
-def is_valid_sample(img, cell_polygon, nuclei_polygon, nuclei_list):
+def is_valid_sample(img, cell_polygon, nuclei_polygon, nuclei_list=None):
     # check that neither nucleus or cell boundary touch the ends of the frame
     maxw, maxh = img.shape
     frame = Polygon([(0, 0), (0, maxw), (maxh, maxw), (maxh, 0)])
-    if frame.touches(cell_polygon) or frame.touches(nuclei_polygon):
+    if frame.touches(cell_polygon.buffer(2)) or frame.touches(nuclei_polygon.buffer(2)):
         return False
     if not frame.contains(cell_polygon) or not cell_polygon.contains(nuclei_polygon):
         return False
 
     # make sure that there's only one nucleus inside cell
-    n_nuc = 0
-    for ncl in nuclei_list:
-        nuclei = ncl['boundary']
-        if cell_polygon.contains(nuclei):
-            n_nuc += 1
-    if n_nuc != 1:
-        return False
+    if nuclei_list is not None:
+        n_nuc = 0
+        for ncl in nuclei_list:
+            nuclei = ncl['boundary']
+            if cell_polygon.contains(nuclei):
+                n_nuc += 1
+        if n_nuc != 1:
+            return False
 
     return True
 
 
-def measure_into_dataframe(hoechst, pericentrin, edu, tubulin, nuclei, cells, resolution):
+def measure_into_dataframe(hoechst, pericentrin, edu, tubulin, nuclei, cells, pix_per_um):
     out = list()
     df = pd.DataFrame()
+    scale = 1. / pix_per_um
     for nucleus in nuclei:
         x0, y0, xf, yf = [int(u) for u in nucleus['boundary'].bounds]
 
@@ -266,18 +234,22 @@ def measure_into_dataframe(hoechst, pericentrin, edu, tubulin, nuclei, cells, re
                          'd': cl['boundary'].centroid.distance(nucleus['boundary'].centroid)})
         clls = sorted(clls, key=lambda k: k['d'])
 
-        if is_valid_sample(hoechst, clls[0]['boundary'], nucleus['boundary'], nuclei):
+        nucl_bnd = nucleus['boundary']
+        cell_bnd = clls[0]['boundary']
+        tubulin_int = integral_over_surface(tubulin, cell_bnd)
+        tub_density = tubulin_int / cell_bnd.area
+        if is_valid_sample(hoechst, cell_bnd, nucl_bnd, nuclei) and tub_density > 1e3:
             pericentrin_crop = pericentrin[y0:yf, x0:xf]
             logger.info('applying centrosome algorithm for nuclei %d' % nucleus['id'])
             # self.pericentrin = exposure.equalize_adapthist(pcrop, clip_limit=0.03)
-            cntr = centrosomes(pericentrin_crop, max_sigma=resolution * 0.5)
+            cntr = centrosomes(pericentrin_crop, max_sigma=pix_per_um * 0.5)
             cntr[:, 0] += x0
             cntr[:, 1] += y0
             cntrsmes = list()
             for k, c in enumerate(cntr):
                 pt = Point(c[0], c[1])
-                pti = integral_over_surface(pericentrin, pt.buffer(resolution * 5))
-                cntrsmes.append({'id': k, 'pt': pt, 'i': pti})
+                pti = integral_over_surface(pericentrin, pt.buffer(pix_per_um * 5))
+                cntrsmes.append({'id': k, 'pt': Point(c[0] / pix_per_um, c[1] / pix_per_um), 'i': pti})
                 cntrsmes = sorted(cntrsmes, key=lambda k: k['i'], reverse=True)
 
             logger.debug('centrosomes {:s}'.format(str(cntrsmes)))
@@ -286,12 +258,11 @@ def measure_into_dataframe(hoechst, pericentrin, edu, tubulin, nuclei, cells, re
             c1 = cntrsmes[0] if len(cntrsmes) > 0 else None
             c2 = cntrsmes[1] if twocntr else None
 
-            nucl_bnd = nucleus['boundary']
-            cell_bnd = clls[0]['boundary']
-
             edu_int = integral_over_surface(edu, nucl_bnd)
             dna_int = integral_over_surface(hoechst, nucl_bnd)
-            tubulin_int = integral_over_surface(tubulin, cell_bnd)
+
+            nucl_bnd = affinity.scale(nucl_bnd, xfact=scale, yfact=scale, origin=(0, 0, 0))
+            cell_bnd = affinity.scale(cell_bnd, xfact=scale, yfact=scale, origin=(0, 0, 0))
 
             lc = 2 if c2 is not None else 1
             d = pd.DataFrame(data={
@@ -299,6 +270,8 @@ def measure_into_dataframe(hoechst, pericentrin, edu, tubulin, nuclei, cells, re
                 'dna_int': [dna_int],
                 'edu_int': [edu_int],
                 'tubulin_int': [tubulin_int],
+                'dna_dens': [dna_int / nucl_bnd.area],
+                'tubulin_dens': [tubulin_int / cell_bnd.area],
                 'centrosomes': [lc],
                 'c1_int': [c1['i'] if c1 is not None else np.nan],
                 'c2_int': [c2['i'] if c2 is not None else np.nan],

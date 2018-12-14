@@ -9,10 +9,13 @@ from skimage import transform
 from skimage import exposure
 from skimage import io
 import shapely.wkt
-from shapely.geometry.point import Point
+from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
+from matplotlib.figure import Figure
 
+import measurements as m
 from gui.utils import canvas_to_pil
 from gui.explore import RenderImagesThread
+from gui import convert_to, meter, pix, um
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger('hhlab')
@@ -27,11 +30,11 @@ def ensure_dir(file_path):
 
 
 class Montage:
-    def __init__(self, dir):
+    def __init__(self, folder):
         l = list()
-        self.dir = dir
+        self.dir = folder
         #  build a list of dicts for every image file in the directory
-        for root, directories, filenames in os.walk(dir):
+        for root, directories, filenames in os.walk(folder):
             for filename in filenames:
                 ext = filename.split('.')[-1]
                 if ext == 'tiff':
@@ -125,6 +128,9 @@ class Dataframe(Montage):
             raise Exception('key columns not in provided dataframe row=%s col=%s fid=%s' % (is_row, is_col, is_fid))
         self.images_path = images_path
         self._super_initialized = False
+        self.um_per_pix = convert_to(1.8983367649421008E-07 * meter / pix, um / pix).n()
+        self.pix_per_um = 1 / self.um_per_pix
+        self.pix_per_um = float(self.pix_per_um.args[0])
 
     def stack_generator(self):
         samples = self.samples.groupby(['row', 'col', 'fid']).size().reset_index()
@@ -144,36 +150,45 @@ class Dataframe(Montage):
 
         hoechst = color.gray2rgb(hoechst)
         tubulin = color.gray2rgb(tubulin)
-        pericentrin = color.gray2rgb(pericentrin)
-        edu = color.gray2rgb(edu)
+        # pericentrin = color.gray2rgb(pericentrin)
+        # edu = color.gray2rgb(edu)
 
         alexa_488 = [.29, 1., 0]
         alexa_594 = [1., .61, 0]
         alexa_647 = [.83, .28, .28]
         hoechst_33342 = [0, .57, 1.]
-        out = hoechst * hoechst_33342 * 0.25 + \
-              tubulin * alexa_488 * 0.25 + \
-              pericentrin * alexa_594 * 0.25 + \
-              edu * alexa_647 * 0.25
+        # out = hoechst * hoechst_33342 * 0.25 + \
+        #       tubulin * alexa_488 * 0.25 + \
+        #       pericentrin * alexa_594 * 0.25 + \
+        #       edu * alexa_647 * 0.25
+
+        out = hoechst * hoechst_33342 * 0.5 + tubulin * alexa_488 * 0.3
+        # out = tubulin * alexa_488 * 0.3
 
         smpls = self.samples[(self.samples['row'] == row) & (self.samples['col'] == col) & (self.samples['fid'] == fid)]
+
+        fig = Figure((3, 3), dpi=150)
+        canvas = FigureCanvas(fig)
+        ax = fig.gca()
 
         basepath = os.path.dirname(self.dir)
         for id, dfi in smpls.groupby('id'):
             nucleus = shapely.wkt.loads(dfi['nucleus'].values[0])
             cell = shapely.wkt.loads(dfi['cell'].values[0])
-            c1 = shapely.wkt.loads(dfi['c1'].values[0])
-            c2 = shapely.wkt.loads(dfi['c2'].values[0])
+            c1 = shapely.wkt.loads(dfi['c1'].values[0]) if dfi['c1'].values[0] is not None else None
+            c2 = shapely.wkt.loads(dfi['c2'].values[0]) if dfi['c2'].values[0] is not None else None
+            tub_density = dfi['tubulin_int'].values[0] / cell.area
             minx, miny, maxx, maxy = cell.bounds
-            ax, fig, canvas = RenderImagesThread.render(nucleus, cell, [c1, c2], width=200, height=200,
-                                                        xlim=[minx - 20, maxx + 20], ylim=[miny - 20, maxy + 20])
+            if m.is_valid_sample(edu, cell, nucleus) and tub_density > 2e3:
+                RenderImagesThread.render(ax, nucleus, cell, [c1, c2],
+                                          xlim=[minx - 20, maxx + 20], ylim=[miny - 20, maxy + 20])
+                w, h = edu.shape
+                ax.imshow(out, extent=[0, w / self.pix_per_um, h / self.pix_per_um, 0])
 
-            ax.imshow(out)
+                pil = canvas_to_pil(canvas)
 
-            pil = canvas_to_pil(canvas)
-
-            path = os.path.abspath(os.path.join(basepath, 'render/r%d-c%d-f%d-i%d.jpg' % (row, col, fid, id)))
-            pil.save(ensure_dir(path))
+                path = os.path.abspath(os.path.join(basepath, 'render/r%d-c%d-f%d-i%d.jpg' % (row, col, fid, id)))
+                pil.save(ensure_dir(path))
 
     def max_projection(self, row, col, fid):
         if not self._super_initialized:

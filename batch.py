@@ -1,5 +1,7 @@
 import logging
 
+from gui import convert_to, meter, pix, um
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger('hhlab')
 
@@ -10,13 +12,15 @@ def batch_process_operetta_folder(path):
     for row, col, fid in operetta.stack_generator():
         hoechst, tubulin, pericentrin, edu = operetta.max_projection(row, col, fid)
         r = 30  # [um]
-        resolution = 1550.3e-4
-        imgseg, props = m.nuclei_segmentation(hoechst, radius=r * resolution)
-        operetta.add_mesurement(row, col, fid, 'nuclei found', len(np.unique(imgseg)))
+        um_per_pix = convert_to(1.8983367649421008E-07 * meter / pix, um / pix).n()
+        pix_per_um = 1 / um_per_pix
+        pix_per_um = float(pix_per_um.args[0])
 
-        if len(props) > 0:
-            outdf = outdf.append(props)
+        imgseg = m.nuclei_segmentation(hoechst, radius=r * pix_per_um)
+        n_nuclei = len(np.unique(imgseg))
+        operetta.add_mesurement(row, col, fid, 'nuclei found', n_nuclei)
 
+        if n_nuclei > 1:
             # self.nuclei_features = m.nuclei_features(imgseg, area_thresh=(r * self.resolution) ** 2 * np.pi)
             nuclei = m.nuclei_features(imgseg)
             for i, n in enumerate(nuclei):
@@ -24,11 +28,12 @@ def batch_process_operetta_folder(path):
 
             cells, _ = m.cell_boundary(tubulin, hoechst)
 
-            samples, df = m.measure_into_dataframe(hoechst, pericentrin, edu, tubulin, nuclei, cells, resolution)
-            df['fid'] = fid
-            df['row'] = row
-            df['col'] = col
-            outdf = outdf.append(df, ignore_index=True, sort=False)
+            samples, df = m.measure_into_dataframe(hoechst, pericentrin, edu, tubulin, nuclei, cells, pix_per_um)
+            if len(df) > 0:
+                df['fid'] = fid
+                df['row'] = row
+                df['col'] = col
+                outdf = outdf.append(df, ignore_index=True, sort=False)
 
     pd.to_pickle(outdf, 'out/nuclei.pandas')
     operetta.files.to_csv('out/operetta.csv')

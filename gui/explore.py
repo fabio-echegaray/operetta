@@ -1,6 +1,7 @@
 import logging
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import seaborn as sns
 import skimage.draw as draw
@@ -82,15 +83,10 @@ class RenderImagesThread(QThread):
         self._rendered = False
 
     @staticmethod
-    def render(nucleus, cell, centrosomes, width=50, height=50, dpi=72, pix_per_um=1, xlim=None, ylim=None):
-
-        # create a matplotlib axis and plot edu image
-        fig = Figure((width / dpi, height / dpi), subplotpars=sp, dpi=dpi)
-        canvas = FigureCanvas(fig)
-        ax = fig.gca()
+    def render(ax, nucleus, cell, centrosomes, pix_per_um=1, xlim=None, ylim=None):
         ax.set_aspect('equal')
         ax.set_axis_off()
-        l, b, w, h = fig.bbox.bounds
+        l, b, w, h = ax.get_figure().bbox.bounds
 
         x, y = nucleus.exterior.xy
         cen = nucleus.centroid
@@ -114,8 +110,8 @@ class RenderImagesThread(QThread):
         if cell is not None:
             x, y = cell.exterior.xy
             ax.plot(x, y, color='green', linewidth=1, solid_capstyle='round', zorder=1)
-            cen = cell.centroid
-            ax.plot(cen.x, cen.y, color='green', marker='+', linewidth=1, solid_capstyle='round', zorder=2)
+            cenc = cell.centroid
+            ax.plot(cenc.x, cenc.y, color='green', marker='+', linewidth=1, solid_capstyle='round', zorder=2)
 
         if centrosomes is not None:
             c1, c2 = centrosomes
@@ -123,6 +119,8 @@ class RenderImagesThread(QThread):
                 c = plt.Circle((c1.x, c1.y), radius=5, facecolor='none', edgecolor=SUSSEX_CORAL_RED,
                                linewidth=3, zorder=5)
                 ax.add_artist(c)
+                ax.plot([c1.x, cen.x], [c1.y, cen.y], color='red', linewidth=1, zorder=2)
+                ax.text(c1.x, c1.y, '%0.2f' % (c1.distance(cen)), color='w', zorder=10)
             if c2 is not None:
                 c = plt.Circle((c2.x, c2.y), radius=5, facecolor='none', edgecolor=SUSSEX_NAVY_BLUE,
                                linewidth=3, zorder=5)
@@ -130,11 +128,10 @@ class RenderImagesThread(QThread):
 
         xw = (xf - x0) / 10
         x0 += xw
-        print(x0, y0)
         ax.plot([x0, x0 + 10 * pix_per_um], [y0, y0], c='w', lw=4)
         ax.text(x0 + 1 * pix_per_um, y0 + 1 * pix_per_um, '10 um', color='w')
 
-        return ax, fig, canvas
+        return
 
     def run(self):
         """
@@ -143,10 +140,13 @@ class RenderImagesThread(QThread):
         if not self._rendered:
             c1 = self.centrosomes[0]['pt']
             c2 = self.centrosomes[1]['pt']
-            self.ax, self.fig, self.canvas = RenderImagesThread.render(self.nucleus, self.cell, [c1, c2],
-                                                                       width=self.lqlbl.width(),
-                                                                       height=self.lqlbl.height(),
-                                                                       dpi=mydpi, pix_per_um=self.pix_per_um)
+            width = self.lqlbl.width()
+            height = self.lqlbl.height()
+            self.fig = Figure((width / mydpi, height / mydpi), subplotpars=sp, dpi=mydpi)
+            self.canvas = FigureCanvas(self.fig)
+            self.ax = self.fig.gca()
+
+            RenderImagesThread.render(self.ax, self.nucleus, self.cell, [c1, c2], pix_per_um=self.pix_per_um)
 
         self.ax.imshow(self.hoechst, cmap='gray')
         self.qimg_hoechst = ImageQt(utils.canvas_to_pil(self.canvas))
@@ -198,9 +198,10 @@ if LOAD_GUI:
 
             logger.info('applying nuclei algorithm')
             r = 6  # [um]
-            imgseg, props = m.nuclei_segmentation(self.hoechst, radius=r * self.pix_per_um)
+            imgseg = m.nuclei_segmentation(self.hoechst, radius=r * self.pix_per_um)
+            n_nuclei = len(np.unique(imgseg))
 
-            if len(props) == 0:
+            if n_nuclei > 1:
                 logger.info('found no nuclear features on the hoechst image.')
                 return
 
