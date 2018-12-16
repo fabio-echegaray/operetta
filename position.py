@@ -1,4 +1,5 @@
 import logging
+import os
 
 from sympy import lambdify
 import matplotlib.pyplot as plt
@@ -10,6 +11,8 @@ import shapely.geometry
 from descartes import PolygonPatch
 from sympy import symbols
 from sympy.physics.mechanics import ReferenceFrame
+
+import operetta as o
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger('hhlab')
@@ -28,9 +31,6 @@ def s_phase_function(t, ref):
 
 
 def move_images(df, path, folder):
-    import os
-    import operetta as o
-
     render_path = o.ensure_dir(os.path.join(path, 'render'))
     destination_folder = os.path.join(render_path, folder)
     os.makedirs(destination_folder, exist_ok=True)
@@ -42,6 +42,111 @@ def move_images(df, path, folder):
             os.rename(original_path, destination_path)
         except Exception:
             logger.warning('no render for %s' % destination_path)
+
+
+def u2os_polygons():
+    # G1 ellipse
+    circ = shapely.geometry.Point((2.0, 14.4)).buffer(0.8)
+    ell = shapely.affinity.scale(circ, 1, 0.6)
+    ellr = shapely.affinity.rotate(ell, 25)
+    yield ellr
+
+    # S phase rect 1
+    poly = shapely.geometry.Polygon([(1.3, 14.7), (2.7, 15.0), (3.0, 15.9), (1.5, 16.3)])
+    yield poly
+
+    # S phase rect 2
+    poly = shapely.geometry.Polygon([(3.18, 15.2), (4.6, 15.6), (4.6, 16.6), (3.0, 16.1)])
+    yield poly
+
+    # G2 ellipse
+    circ = shapely.geometry.Point((3.8, 14.9)).buffer(1)
+    ell = shapely.affinity.scale(circ, 1.1, 0.5)
+    ellr = shapely.affinity.rotate(ell, 15)
+    yield ellr
+
+    x = np.linspace(0.1, 4.5, num=100)
+    t = symbols('t', positive=True)
+    N = ReferenceFrame('N')
+    f, tn, nn = s_phase_function(t, N)
+
+    h = 0.8
+    interior = lambdify(t, (nn * h).to_matrix(N))
+    exterior = lambdify(t, (nn * -h).to_matrix(N))
+
+    xti = None
+    for k, xt in enumerate(np.arange(2.3, 4.5, step=0.7)):
+        x_ii = np.where(x <= xt)[0].max() + 1
+        xx = x[x_ii]
+
+        xi, yi, _ = interior(xx) + np.array([[xx], [f(xx)], [0]])
+        xf, yf, _ = exterior(xx) + np.array([[xx], [f(xx)], [0]])
+
+        if xti is not None:
+            x_ix = np.where((xti <= x) & (x <= xt))[0]
+            xx = x[np.append(x_ix, x_ix.max() + 1)]
+            [xi], [yi], _ = interior(xx) + np.array([[xx], [f(xx)], [0]])
+            [xf], [yf], _ = exterior(xx) + np.array([[xx], [f(xx)], [0]])
+            pointList = list()
+            pointList.extend([shapely.geometry.Point(x, y) for x, y in zip(xi, yi)])
+            pointList.extend([shapely.geometry.Point(x, y) for x, y in zip(np.flip(xf), np.flip(yf))])
+
+            poly = shapely.geometry.Polygon([(p.x, p.y) for p in pointList])
+            yield poly
+
+        xti = xt
+
+def rpe_polygons():
+    # G1 ellipse
+    circ = shapely.geometry.Point((2.2, 13.8)).buffer(0.9)
+    ell = shapely.affinity.scale(circ, 1, 0.6)
+    ellr = shapely.affinity.rotate(ell, 20)
+    yield ellr
+
+    # S phase rect 1
+    poly = shapely.geometry.Polygon([(1.5, 14.4), (3.0, 14.4), (3.0, 15.4), (1.5, 15.4)])
+    yield poly
+
+    # S phase rect 2
+    poly = shapely.geometry.Polygon([(3.3, 16.1), (5.5, 16.6), (5.5, 15.1), (3.2, 14.8)])
+    yield poly
+
+    # G2 ellipse
+    circ = shapely.geometry.Point((4.35, 14.4)).buffer(1)
+    ell = shapely.affinity.scale(circ, 1.4, 0.6)
+    ellr = shapely.affinity.rotate(ell, 15)
+    yield ellr
+
+    x = np.linspace(0.1, 5.5, num=100)
+    t = symbols('t', positive=True)
+    N = ReferenceFrame('N')
+    f, tn, nn = s_phase_function(t, N)
+
+    h = 0.8
+    interior = lambdify(t, (nn * h).to_matrix(N))
+    exterior = lambdify(t, (nn * -h).to_matrix(N))
+
+    xti = None
+    for k, xt in enumerate(np.arange(2.2, 5.5, step=0.7)):
+        x_ii = np.where(x <= xt)[0].max() + 1
+        xx = x[x_ii]
+
+        xi, yi, _ = interior(xx) + np.array([[xx], [f(xx)], [0]])
+        xf, yf, _ = exterior(xx) + np.array([[xx], [f(xx)], [0]])
+
+        if xti is not None:
+            x_ix = np.where((xti <= x) & (x <= xt))[0]
+            xx = x[np.append(x_ix, x_ix.max() + 1)]
+            [xi], [yi], _ = interior(xx) + np.array([[xx], [f(xx)], [0]])
+            [xf], [yf], _ = exterior(xx) + np.array([[xx], [f(xx)], [0]])
+            pointList = list()
+            pointList.extend([shapely.geometry.Point(x, y) for x, y in zip(xi, yi)])
+            pointList.extend([shapely.geometry.Point(x, y) for x, y in zip(np.flip(xf), np.flip(yf))])
+
+            poly = shapely.geometry.Polygon([(p.x, p.y) for p in pointList])
+            yield poly
+
+        xti = xt
 
 
 if __name__ == '__main__':
@@ -62,9 +167,6 @@ if __name__ == '__main__':
     formatter = EngFormatter(unit='')
     ax.xaxis.set_major_formatter(formatter)
     ax.yaxis.set_major_formatter(formatter)
-    # ax.semilogy()
-    # ax.set_xlim([6e6, 6e7])
-    # ax.set_ylim([3e5, 1e8])
     ax.set_xlim([1, 8])
     ax.set_ylim([12, 18.5])
     ax.set_aspect('equal')
@@ -77,111 +179,29 @@ if __name__ == '__main__':
     # sns.scatterplot(x="dna_int", y="edu_int", hue="c1_d_nuc_bound", size="c1_int",
     #                 alpha=.5, palette="PRGn", data=df, ax=ax)
 
-    render_path = '/Volumes/Kidbeat/data/centrosome-dist(rpe)__2018-12-05T18_27_53-Measurement 2'
-    # G1 ellipse
-    circ = shapely.geometry.Point((2.2, 13.8)).buffer(0.9)
-    ell = shapely.affinity.scale(circ, 1, 0.6)
-    ellr = shapely.affinity.rotate(ell, 20)
+    current_palette = sns.color_palette('bright')
+    # render_path = '/Volumes/Kidbeat/data/centrosome-dist(rpe)__2018-12-05T18_27_53-Measurement 2'
+    # for i, poly in enumerate(rpe_polygons()):
+    render_path = '/Volumes/Kidbeat/data/centr-dist(u2os)__2018-11-27T18_08_10-Measurement 1'
+    for i, poly in enumerate(u2os_polygons()):
+        ix = df['geometry'].apply(lambda g: g.within(poly))
+        df.loc[ix, 'cluster'] = i + 1
+        move_images(df[ix], render_path, '%d' % (i + 1))
 
-    ix = df['geometry'].apply(lambda g: g.within(ellr))
-    df.loc[ix, 'cluster'] = 1
-    move_images(df[ix], render_path, '1')
+        patch = PolygonPatch(poly, fc=current_palette[i], ec="#999999", alpha=0.5, zorder=2)
+        ax.add_patch(patch)
 
-    patch = PolygonPatch(ellr, fc="#FF0000", ec="#999999", alpha=0.5, zorder=2)
-    ax.add_patch(patch)
-
-    # S phase rect 1
-    poly = shapely.geometry.Polygon([(1.5, 14.4), (3.0, 14.4), (3.0, 15.4), (1.5, 15.4)])
-    patch = PolygonPatch(poly, fc="#0000FF", ec="#999999", alpha=0.6, zorder=2)
-    ax.add_patch(patch)
-
-    ix = df['geometry'].apply(lambda g: g.within(poly))
-    df.loc[ix, 'cluster'] = 2
-    move_images(df[ix], render_path, '2')
-
-    # S phase rect 2
-    poly = shapely.geometry.Polygon([(3.3, 16.1), (5.5, 16.6), (5.5, 15.1), (3.2, 14.8)])
-    patch = PolygonPatch(poly, fc="#0000FF", ec="#999999", alpha=0.6, zorder=2)
-    ax.add_patch(patch)
-
-    ix = df['geometry'].apply(lambda g: g.within(poly))
-    df.loc[ix, 'cluster'] = 19
-    move_images(df[ix], render_path, '19')
-
-    # G2 ellipse
-    circ = shapely.geometry.Point((4.35, 14.4)).buffer(1)
-    ell = shapely.affinity.scale(circ, 1.4, 0.6)
-    ellr = shapely.affinity.rotate(ell, 15)
-
-    ix = df['geometry'].apply(lambda g: g.within(ellr))
-    df.loc[ix, 'cluster'] = 20
-    move_images(df[ix], render_path, '20')
-
-    patch = PolygonPatch(ellr, fc="#FF0000", ec="#999999", alpha=0.5, zorder=2)
-    ax.add_patch(patch)
-
-    x = np.linspace(0.1, 5.5, num=100)
-    t = symbols('t', positive=True)
-    N = ReferenceFrame('N')
-    f, tn, nn = s_phase_function(t, N)
-
-    h = 0.8
-    interior = lambdify(t, (nn * h).to_matrix(N))
-    exterior = lambdify(t, (nn * -h).to_matrix(N))
-
-    [ox], [oy], _ = interior(x) + np.array([[x], [f(x)], [0]])
-    [ix], [iy], _ = exterior(x) + np.array([[x], [f(x)], [0]])
-    ax.plot(ox, oy, c='#000AFF')
-    ax.plot(x, f(x), c='#FF00FF', zorder=1)
-    ax.plot(ix, iy, c='#000AFF')
-
-    n = len(np.arange(2.2, 5.5, step=0.5))
-    current_palette = sns.color_palette('bright', n)
-    print(current_palette)
-    xti = None
-    for k, xt in enumerate(np.arange(2.2, 5.5, step=0.7)):
-        x_ii = np.where(x <= xt)[0].max() + 1
-        xx = x[x_ii]
-
-        xi, yi, _ = interior(xx) + np.array([[xx], [f(xx)], [0]])
-        xf, yf, _ = exterior(xx) + np.array([[xx], [f(xx)], [0]])
-        ax.scatter(xx, f(xx), s=10, c='k', zorder=10)
-        ax.plot([xi, xf], [yi, yf], c='r', zorder=10)
-
-        if xti is not None:
-            x_ix = np.where((xti <= x) & (x <= xt))[0]
-            xx = x[np.append(x_ix, x_ix.max() + 1)]
-            [xi], [yi], _ = interior(xx) + np.array([[xx], [f(xx)], [0]])
-            [xf], [yf], _ = exterior(xx) + np.array([[xx], [f(xx)], [0]])
-            pointList = list()
-            pointList.extend([shapely.geometry.Point(x, y) for x, y in zip(xi, yi)])
-            pointList.extend([shapely.geometry.Point(x, y) for x, y in zip(np.flip(xf), np.flip(yf))])
-
-            poly = shapely.geometry.Polygon([(p.x, p.y) for p in pointList])
-            patch = PolygonPatch(poly, fc=current_palette[k], ec="#999999", alpha=0.6, zorder=2)
-            ax.add_patch(patch)
-
-            ix = df['geometry'].apply(lambda g: g.within(poly))
-            df.loc[ix, 'cluster'] = k + 2
-            move_images(df[ix], render_path, '%d' % (k + 2))
-
-        xti = xt
     fig.savefig('facs.pdf')
 
     print(df.groupby('cluster').size())
 
-    # fig = plt.figure(figsize=(5, 5))
-    # ax = fig.gca()
-    # print(df.groupby('cluster').size())
-    # with sns.color_palette('bright'):
-    #     for ii, dfi in df[df['cluster'] > 0].groupby('cluster'):
-    #         sns.distplot(dfi['c1_d_nuc_bound'].dropna(), hist=False, rug=True)
-    # fig.savefig('centr-distribution.pdf')
+    g = sns.FacetGrid(df[df['cluster'] > 0], row="cluster", height=1.5, aspect=5)
+    g = g.map(sns.distplot, "c1_d_nuc_centr", rug=True)
+    g.savefig('centr-distribution-c.pdf')
 
     g = sns.FacetGrid(df[df['cluster'] > 0], row="cluster", height=1.5, aspect=5)
-    # g = g.map(sns.distplot, "c1_d_nuc_bound", rug=True)
-    g = g.map(sns.distplot, "c1_d_nuc_centr", rug=True)
-    g.savefig('centr-distribution.pdf')
+    g = g.map(sns.distplot, "c1_d_nuc_bound", rug=True)
+    g.savefig('centr-distribution-b.pdf')
 
     #
     #
@@ -208,15 +228,13 @@ if __name__ == '__main__':
     plt.show()
 
     if False:
-        import os
         import sys
         from PyQt4.QtCore import *
         from PyQt4.QtGui import QApplication
         from gui.explore import ExplorationGui
         from gui.browse import BrowseGui
-        import operetta as o
 
-        b_path = '/Volumes/Kidbeat/data/centr-dist(u2os)__2018-11-27T18_08_10-Measurement 1/Images'
+        b_path = '/Volumes/Kidbeat/data/centr-dist(u2os)__2018-11-27T18_08_10-Measurement 1/'
 
         base_path = os.path.abspath('%s' % os.getcwd())
         logging.info('Qt version:' + QT_VERSION_STR)
