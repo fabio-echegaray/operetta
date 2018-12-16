@@ -27,8 +27,26 @@ def s_phase_function(t, ref):
     return lambdify(t, f.to_matrix(ref)[1]), Tn, Nn
 
 
+def move_images(df, path, folder):
+    import os
+    import operetta as o
+
+    render_path = o.ensure_dir(os.path.join(path, 'render'))
+    destination_folder = os.path.join(render_path, folder)
+    os.makedirs(destination_folder, exist_ok=True)
+    for i, r in df.iterrows():
+        name, original_path = o.Dataframe.render_filename(r, path)
+        destination_path = os.path.join(destination_folder, name)
+        try:
+            logger.warning('moving %s to %s' % (name, folder))
+            os.rename(original_path, destination_path)
+        except Exception:
+            logger.warning('no render for %s' % destination_path)
+
+
 if __name__ == '__main__':
     df = pd.read_pickle('out/nuclei.pandas')
+    df = df[df['tubulin_dens'] > 0.5e3]
     print(df.groupby(['fid', 'row', 'col', 'id']).size())
     print(len(df.groupby(['fid', 'row', 'col', 'id']).size()))
 
@@ -59,6 +77,7 @@ if __name__ == '__main__':
     # sns.scatterplot(x="dna_int", y="edu_int", hue="c1_d_nuc_bound", size="c1_int",
     #                 alpha=.5, palette="PRGn", data=df, ax=ax)
 
+    render_path = '/Volumes/Kidbeat/data/centrosome-dist(rpe)__2018-12-05T18_27_53-Measurement 2'
     # G1 ellipse
     circ = shapely.geometry.Point((2.2, 13.8)).buffer(0.9)
     ell = shapely.affinity.scale(circ, 1, 0.6)
@@ -66,6 +85,7 @@ if __name__ == '__main__':
 
     ix = df['geometry'].apply(lambda g: g.within(ellr))
     df.loc[ix, 'cluster'] = 1
+    move_images(df[ix], render_path, '1')
 
     patch = PolygonPatch(ellr, fc="#FF0000", ec="#999999", alpha=0.5, zorder=2)
     ax.add_patch(patch)
@@ -77,6 +97,7 @@ if __name__ == '__main__':
 
     ix = df['geometry'].apply(lambda g: g.within(poly))
     df.loc[ix, 'cluster'] = 2
+    move_images(df[ix], render_path, '2')
 
     # S phase rect 2
     poly = shapely.geometry.Polygon([(3.3, 16.1), (5.5, 16.6), (5.5, 15.1), (3.2, 14.8)])
@@ -85,6 +106,7 @@ if __name__ == '__main__':
 
     ix = df['geometry'].apply(lambda g: g.within(poly))
     df.loc[ix, 'cluster'] = 19
+    move_images(df[ix], render_path, '19')
 
     # G2 ellipse
     circ = shapely.geometry.Point((4.35, 14.4)).buffer(1)
@@ -93,6 +115,7 @@ if __name__ == '__main__':
 
     ix = df['geometry'].apply(lambda g: g.within(ellr))
     df.loc[ix, 'cluster'] = 20
+    move_images(df[ix], render_path, '20')
 
     patch = PolygonPatch(ellr, fc="#FF0000", ec="#999999", alpha=0.5, zorder=2)
     ax.add_patch(patch)
@@ -140,6 +163,7 @@ if __name__ == '__main__':
 
             ix = df['geometry'].apply(lambda g: g.within(poly))
             df.loc[ix, 'cluster'] = k + 2
+            move_images(df[ix], render_path, '%d' % (k + 2))
 
         xti = xt
     fig.savefig('facs.pdf')
@@ -155,7 +179,8 @@ if __name__ == '__main__':
     # fig.savefig('centr-distribution.pdf')
 
     g = sns.FacetGrid(df[df['cluster'] > 0], row="cluster", height=1.5, aspect=5)
-    g = g.map(sns.distplot, "c1_d_nuc_bound", rug=True)
+    # g = g.map(sns.distplot, "c1_d_nuc_bound", rug=True)
+    g = g.map(sns.distplot, "c1_d_nuc_centr", rug=True)
     g.savefig('centr-distribution.pdf')
 
     #

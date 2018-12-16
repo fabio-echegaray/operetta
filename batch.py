@@ -2,7 +2,7 @@ import logging
 
 from gui import convert_to, meter, pix, um
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger('hhlab')
 
 

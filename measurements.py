@@ -197,13 +197,22 @@ def cell_boundary(tubulin, hoechst, threshold=80, markers=None):
     return boundaries_list, gabor_proc
 
 
-def is_valid_sample(img, cell_polygon, nuclei_polygon, nuclei_list=None):
+def is_valid_sample(tubulin, cell_polygon, nuclei_polygon, nuclei_list=None):
     # check that neither nucleus or cell boundary touch the ends of the frame
-    maxw, maxh = img.shape
+    maxw, maxh = tubulin.shape
     frame = Polygon([(0, 0), (0, maxw), (maxh, maxw), (maxh, 0)])
+    # FIXME: not woking
     if frame.touches(cell_polygon.buffer(2)) or frame.touches(nuclei_polygon.buffer(2)):
+        logger.debug('sample rejected because it was touching the frame')
         return False
-    if not frame.contains(cell_polygon) or not cell_polygon.contains(nuclei_polygon):
+    if not cell_polygon.contains(nuclei_polygon):
+        logger.debug("sample rejected because it didn't contain a nucleus")
+        return False
+
+    tubulin_int = integral_over_surface(tubulin, cell_polygon)
+    tub_density = tubulin_int / cell_polygon.area
+    logger.debug('tubulin density in cell: %0.2f' % tub_density)
+    if tub_density < 0.5e3:
         return False
 
     # make sure that there's only one nucleus inside cell
@@ -237,8 +246,7 @@ def measure_into_dataframe(hoechst, pericentrin, edu, tubulin, nuclei, cells, pi
         nucl_bnd = nucleus['boundary']
         cell_bnd = clls[0]['boundary']
         tubulin_int = integral_over_surface(tubulin, cell_bnd)
-        tub_density = tubulin_int / cell_bnd.area
-        if is_valid_sample(hoechst, cell_bnd, nucl_bnd, nuclei) and tub_density > 1e3:
+        if is_valid_sample(tubulin, cell_bnd, nucl_bnd, nuclei):
             pericentrin_crop = pericentrin[y0:yf, x0:xf]
             logger.info('applying centrosome algorithm for nuclei %d' % nucleus['id'])
             # self.pericentrin = exposure.equalize_adapthist(pcrop, clip_limit=0.03)

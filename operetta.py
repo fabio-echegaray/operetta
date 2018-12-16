@@ -32,7 +32,7 @@ def ensure_dir(file_path):
 class Montage:
     def __init__(self, folder):
         l = list()
-        self.dir = folder
+        self.dir = os.path.join(folder, 'Images')
         #  build a list of dicts for every image file in the directory
         for root, directories, filenames in os.walk(folder):
             for filename in filenames:
@@ -121,12 +121,13 @@ class Montage:
 
 
 class Dataframe(Montage):
-    def __init__(self, samples_path, images_path):
+    def __init__(self, samples_path, base_path):
         self.samples = pd.read_pickle(samples_path)
         if np.any([i not in self.samples for i in ['row', 'col', 'fid']]):
             is_row, is_col, is_fid = [i not in self.samples for i in ['row', 'col', 'fid']]
             raise Exception('key columns not in provided dataframe row=%s col=%s fid=%s' % (is_row, is_col, is_fid))
-        self.images_path = images_path
+        self.base_path = base_path
+        self.images_path = os.path.join(base_path, 'Images')
         self._super_initialized = False
         self.um_per_pix = convert_to(1.8983367649421008E-07 * meter / pix, um / pix).n()
         self.pix_per_um = 1 / self.um_per_pix
@@ -140,18 +141,25 @@ class Dataframe(Montage):
                         (k, l, r['row'], r['col'], r['fid']))
             yield r['row'], r['col'], r['fid']
 
+    @staticmethod
+    def render_filename(row, basepath):
+        # if len(row) > 1:
+        #     raise Exception('only 1 row allowed')
+        name = 'r%d-c%d-f%d-i%d.jpg' % (row['row'], row['col'], row['fid'], row['id'])
+        path = os.path.abspath(os.path.join(basepath, 'render/%s' % (name)))
+        return name, path
+
     def save_render(self, row, col, fid, max_width=50):
-        hoechst, tubulin, pericentrin, edu = self.max_projection(row, col, fid)
+        hoechst_raw, tubulin_raw, pericentrin_raw, edu_raw = self.max_projection(row, col, fid)
 
-        hoechst = exposure.equalize_hist(hoechst)
-        tubulin = exposure.equalize_hist(tubulin)
-        pericentrin = exposure.equalize_hist(pericentrin)
-        edu = exposure.equalize_hist(edu)
+        tubulin_gray = exposure.equalize_hist(tubulin_raw)
+        # pericentrin_gray = exposure.equalize_hist(pericentrin_gray)
+        # edu_gray = exposure.equalize_hist(edu_gray)
 
-        hoechst = color.gray2rgb(hoechst)
-        tubulin = color.gray2rgb(tubulin)
-        # pericentrin = color.gray2rgb(pericentrin)
-        # edu = color.gray2rgb(edu)
+        # hoechst = color.gray2rgb(hoechst_gray)
+        tubulin = color.gray2rgb(tubulin_gray)
+        # pericentrin = color.gray2rgb(pericentrin_gray)
+        # edu = color.gray2rgb(edu_gray)
 
         alexa_488 = [.29, 1., 0]
         alexa_594 = [1., .61, 0]
@@ -162,8 +170,8 @@ class Dataframe(Montage):
         #       pericentrin * alexa_594 * 0.25 + \
         #       edu * alexa_647 * 0.25
 
-        out = hoechst * hoechst_33342 * 0.5 + tubulin * alexa_488 * 0.3
-        # out = tubulin * alexa_488 * 0.3
+        # out = hoechst * hoechst_33342 * 0.2 + tubulin * alexa_488 * 0.4
+        out = tubulin * alexa_488 * 0.4
 
         smpls = self.samples[(self.samples['row'] == row) & (self.samples['col'] == col) & (self.samples['fid'] == fid)]
 
@@ -175,15 +183,15 @@ class Dataframe(Montage):
         for id, dfi in smpls.groupby('id'):
             nucleus = shapely.wkt.loads(dfi['nucleus'].values[0])
             cell = shapely.wkt.loads(dfi['cell'].values[0])
-            c1 = shapely.wkt.loads(dfi['c1'].values[0]) if dfi['c1'].values[0] is not None else None
-            c2 = shapely.wkt.loads(dfi['c2'].values[0]) if dfi['c2'].values[0] is not None else None
-            tub_density = dfi['tubulin_int'].values[0] / cell.area
-            minx, miny, maxx, maxy = cell.bounds
-            if m.is_valid_sample(edu, cell, nucleus) and tub_density > 2e3:
+            if m.is_valid_sample(tubulin_raw, cell, nucleus):
+                ax.cla()
+                c1 = shapely.wkt.loads(dfi['c1'].values[0]) if dfi['c1'].values[0] is not None else None
+                c2 = shapely.wkt.loads(dfi['c2'].values[0]) if dfi['c2'].values[0] is not None else None
+                minx, miny, maxx, maxy = cell.bounds
+                w, h = tubulin_gray.shape
+                ax.imshow(out, extent=[0, w / self.pix_per_um, h / self.pix_per_um, 0])
                 RenderImagesThread.render(ax, nucleus, cell, [c1, c2],
                                           xlim=[minx - 20, maxx + 20], ylim=[miny - 20, maxy + 20])
-                w, h = edu.shape
-                ax.imshow(out, extent=[0, w / self.pix_per_um, h / self.pix_per_um, 0])
 
                 pil = canvas_to_pil(canvas)
 
@@ -193,6 +201,6 @@ class Dataframe(Montage):
     def max_projection(self, row, col, fid):
         if not self._super_initialized:
             logger.info('Initializing parent of operetta.Dataframe...')
-            super().__init__(self.images_path)
+            super().__init__(self.base_path)
             self._super_initialized = True
         return super().max_projection(row, col, fid)

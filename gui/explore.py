@@ -98,38 +98,38 @@ class RenderImagesThread(QThread):
             ax.set_ylim(ylim)
             x0, xf = xlim
             y0, yf = ylim
-            y0 = max(0, y0) + h / 12
+            x0 = max(0, x0) + 5 * pix_per_um
+            y0 = max(0, y0) + 5 * pix_per_um
 
         else:
             ax.set_xlim(cen.x - w / 2, cen.x + w / 2)
             ax.set_ylim(cen.y - h / 2, cen.y + h / 2)
             x0, xf = cen.x - w / 2, cen.x + w / 2
             y0, yf = cen.y - h / 2, cen.y + h / 2
-            y0 = max(0, y0) + h / 12
+            x0 = max(0, x0) + 5 * pix_per_um
+            y0 = max(0, y0) + 5 * pix_per_um
 
         if cell is not None:
             x, y = cell.exterior.xy
-            ax.plot(x, y, color='green', linewidth=1, solid_capstyle='round', zorder=1)
+            ax.plot(x, y, color='yellow', linewidth=1, solid_capstyle='round', zorder=1)
             cenc = cell.centroid
-            ax.plot(cenc.x, cenc.y, color='green', marker='+', linewidth=1, solid_capstyle='round', zorder=2)
+            ax.plot(cenc.x, cenc.y, color='yellow', marker='+', linewidth=1, solid_capstyle='round', zorder=2)
 
         if centrosomes is not None:
             c1, c2 = centrosomes
             if c1 is not None:
-                c = plt.Circle((c1.x, c1.y), radius=5, facecolor='none', edgecolor=SUSSEX_CORAL_RED,
-                               linewidth=3, zorder=5)
+                c = plt.Circle((c1.x, c1.y), radius=2, facecolor='none', edgecolor=SUSSEX_CORAL_RED,
+                               linewidth=2, zorder=5)
                 ax.add_artist(c)
-                ax.plot([c1.x, cen.x], [c1.y, cen.y], color='red', linewidth=1, zorder=2)
+                ax.plot([c1.x, cen.x], [c1.y, cen.y], color='gray', linewidth=1, zorder=2)
                 ax.text(c1.x, c1.y, '%0.2f' % (c1.distance(cen)), color='w', zorder=10)
             if c2 is not None:
-                c = plt.Circle((c2.x, c2.y), radius=5, facecolor='none', edgecolor=SUSSEX_NAVY_BLUE,
-                               linewidth=3, zorder=5)
+                c = plt.Circle((c2.x, c2.y), radius=2, facecolor='none', edgecolor=SUSSEX_NAVY_BLUE,
+                               linewidth=2, zorder=5)
                 ax.add_artist(c)
 
-        xw = (xf - x0) / 10
-        x0 += xw
         ax.plot([x0, x0 + 10 * pix_per_um], [y0, y0], c='w', lw=4)
-        ax.text(x0 + 1 * pix_per_um, y0 + 1 * pix_per_um, '10 um', color='w')
+        ax.text(x0 + 1 * pix_per_um, y0 + 1.5 * pix_per_um, '10 um', color='w')
 
         return
 
