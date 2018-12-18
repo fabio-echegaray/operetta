@@ -197,11 +197,17 @@ def cell_boundary(tubulin, hoechst, threshold=80, markers=None):
     return boundaries_list, gabor_proc
 
 
-def is_valid_sample(tubulin, cell_polygon, nuclei_polygon, nuclei_list=None):
+def is_valid_sample(tubulin, cell_polygon, nuclei_polygon, nuclei_list=None, pix_per_um=1):
     # check that neither nucleus or cell boundary touch the ends of the frame
     maxw, maxh = tubulin.shape
     frame = Polygon([(0, 0), (0, maxw), (maxh, maxw), (maxh, 0)])
-    # FIXME: not woking
+
+    if pix_per_um != 1:
+        scale = pix_per_um
+        nuclei_polygon = affinity.scale(nuclei_polygon, xfact=scale, yfact=scale, origin=(0, 0, 0))
+        cell_polygon = affinity.scale(cell_polygon, xfact=scale, yfact=scale, origin=(0, 0, 0))
+
+    # FIXME: not working
     if frame.touches(cell_polygon.buffer(2)) or frame.touches(nuclei_polygon.buffer(2)):
         logger.debug('sample rejected because it was touching the frame')
         return False
@@ -211,8 +217,9 @@ def is_valid_sample(tubulin, cell_polygon, nuclei_polygon, nuclei_list=None):
 
     tubulin_int = integral_over_surface(tubulin, cell_polygon)
     tub_density = tubulin_int / cell_polygon.area
-    logger.debug('tubulin density in cell: %0.2f' % tub_density)
-    if tub_density < 0.5e3:
+    logger.debug(
+        'tubulin density in cell: %0.2f, intensity %0.2f, area %0.2f' % (tub_density, tubulin_int, cell_polygon.area))
+    if tub_density < 250:
         return False
 
     # make sure that there's only one nucleus inside cell
@@ -245,7 +252,6 @@ def measure_into_dataframe(hoechst, pericentrin, edu, tubulin, nuclei, cells, pi
 
         nucl_bnd = nucleus['boundary']
         cell_bnd = clls[0]['boundary']
-        tubulin_int = integral_over_surface(tubulin, cell_bnd)
         if is_valid_sample(tubulin, cell_bnd, nucl_bnd, nuclei):
             pericentrin_crop = pericentrin[y0:yf, x0:xf]
             logger.info('applying centrosome algorithm for nuclei %d' % nucleus['id'])
@@ -266,11 +272,12 @@ def measure_into_dataframe(hoechst, pericentrin, edu, tubulin, nuclei, cells, pi
             c1 = cntrsmes[0] if len(cntrsmes) > 0 else None
             c2 = cntrsmes[1] if twocntr else None
 
+            tubulin_int = integral_over_surface(tubulin, cell_bnd)
             edu_int = integral_over_surface(edu, nucl_bnd)
             dna_int = integral_over_surface(hoechst, nucl_bnd)
 
-            nucl_bnd = affinity.scale(nucl_bnd, xfact=scale, yfact=scale, origin=(0, 0, 0))
-            cell_bnd = affinity.scale(cell_bnd, xfact=scale, yfact=scale, origin=(0, 0, 0))
+            nucl_bndum = affinity.scale(nucl_bnd, xfact=scale, yfact=scale, origin=(0, 0, 0))
+            cell_bndum = affinity.scale(cell_bnd, xfact=scale, yfact=scale, origin=(0, 0, 0))
 
             lc = 2 if c2 is not None else 1
             d = pd.DataFrame(data={
@@ -283,17 +290,17 @@ def measure_into_dataframe(hoechst, pericentrin, edu, tubulin, nuclei, cells, pi
                 'centrosomes': [lc],
                 'c1_int': [c1['i'] if c1 is not None else np.nan],
                 'c2_int': [c2['i'] if c2 is not None else np.nan],
-                'c1_d_nuc_centr': [nucl_bnd.centroid.distance(c1['pt']) if c1 is not None else np.nan],
-                'c2_d_nuc_centr': [nucl_bnd.centroid.distance(c2['pt']) if twocntr else np.nan],
-                'c1_d_nuc_bound': [nucl_bnd.exterior.distance(c1['pt']) if c1 is not None else np.nan],
-                'c2_d_nuc_bound': [nucl_bnd.exterior.distance(c2['pt']) if twocntr else np.nan],
-                'c1_d_cell_centr': [cell_bnd.centroid.distance(c1['pt']) if c1 is not None else np.nan],
-                'c2_d_cell_centr': [cell_bnd.centroid.distance(c2['pt']) if twocntr else np.nan],
-                'c1_d_cell_bound': [cell_bnd.exterior.distance(c1['pt']) if c1 is not None else np.nan],
-                'c2_d_cell_bound': [cell_bnd.exterior.distance(c2['pt']) if twocntr else np.nan],
+                'c1_d_nuc_centr': [nucl_bndum.centroid.distance(c1['pt']) if c1 is not None else np.nan],
+                'c2_d_nuc_centr': [nucl_bndum.centroid.distance(c2['pt']) if twocntr else np.nan],
+                'c1_d_nuc_bound': [nucl_bndum.exterior.distance(c1['pt']) if c1 is not None else np.nan],
+                'c2_d_nuc_bound': [nucl_bndum.exterior.distance(c2['pt']) if twocntr else np.nan],
+                'c1_d_cell_centr': [cell_bndum.centroid.distance(c1['pt']) if c1 is not None else np.nan],
+                'c2_d_cell_centr': [cell_bndum.centroid.distance(c2['pt']) if twocntr else np.nan],
+                'c1_d_cell_bound': [cell_bndum.exterior.distance(c1['pt']) if c1 is not None else np.nan],
+                'c2_d_cell_bound': [cell_bndum.exterior.distance(c2['pt']) if twocntr else np.nan],
                 'c1_d_c2': [c1['pt'].distance(c2['pt']) if twocntr else np.nan],
-                'cell': cell_bnd.wkt,
-                'nucleus': nucl_bnd.wkt,
+                'cell': cell_bndum.wkt,
+                'nucleus': nucl_bndum.wkt,
                 'c1': c1['pt'].wkt if c1 is not None else None,
                 'c2': c2['pt'].wkt if c2 is not None else None,
             })

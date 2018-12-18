@@ -44,6 +44,21 @@ def move_images(df, path, folder):
             logger.warning('no render for %s' % destination_path)
 
 
+def render_images(df, path, folder):
+    render_path = o.ensure_dir(os.path.join(path, 'render'))
+    destination_folder = os.path.join(render_path, folder)
+    os.makedirs(destination_folder, exist_ok=True)
+    for i, r in df.iterrows():
+        name, original_path = o.Dataframe.render_filename(r, path)
+        # operetta.save_render(row, col, fid, max_width=300)
+        destination_path = os.path.join(destination_folder, name)
+        try:
+            logger.warning('moving %s to %s' % (name, folder))
+            os.rename(original_path, destination_path)
+        except Exception:
+            logger.warning('no render for %s' % destination_path)
+
+
 def u2os_polygons():
     # G1 ellipse
     circ = shapely.geometry.Point((2.0, 14.4)).buffer(0.8)
@@ -95,6 +110,7 @@ def u2os_polygons():
             yield poly
 
         xti = xt
+
 
 def rpe_polygons():
     # G1 ellipse
@@ -152,6 +168,9 @@ def rpe_polygons():
 if __name__ == '__main__':
     df = pd.read_pickle('out/nuclei.pandas')
     df = df[df['tubulin_dens'] > 0.5e3]
+    df['c_ratio'] = df['c2_int'] / df['c1_int']
+    df = df[df['c_ratio'] > 0.6]
+
     print(df.groupby(['fid', 'row', 'col', 'id']).size())
     print(len(df.groupby(['fid', 'row', 'col', 'id']).size()))
 
@@ -179,14 +198,22 @@ if __name__ == '__main__':
     # sns.scatterplot(x="dna_int", y="edu_int", hue="c1_d_nuc_bound", size="c1_int",
     #                 alpha=.5, palette="PRGn", data=df, ax=ax)
 
-    current_palette = sns.color_palette('bright')
-    # render_path = '/Volumes/Kidbeat/data/centrosome-dist(rpe)__2018-12-05T18_27_53-Measurement 2'
+    current_palette = sns.color_palette('bright', n_colors=10)
+    # b_path = '/Volumes/Kidbeat/data/centrosome-dist(rpe)__2018-12-05T18_27_53-Measurement 2'
     # for i, poly in enumerate(rpe_polygons()):
-    render_path = '/Volumes/Kidbeat/data/centr-dist(u2os)__2018-11-27T18_08_10-Measurement 1'
+    b_path = '/Volumes/Kidbeat/data/centr-dist(u2os)__2018-11-27T18_08_10-Measurement 1'
+    operetta = o.Dataframe('out/nuclei.pandas', b_path)
     for i, poly in enumerate(u2os_polygons()):
         ix = df['geometry'].apply(lambda g: g.within(poly))
         df.loc[ix, 'cluster'] = i + 1
-        move_images(df[ix], render_path, '%d' % (i + 1))
+
+        basepath = os.path.join(b_path, 'render', '%d' % (i + 1))
+        for i, r in df[ix].iterrows():
+            if os.path.exists(operetta.render_filename(r, basepath)[1]):
+                logger.warning('file exists! %s' % i)
+            logger.debug('rendering %0.2f' % (r['tubulin_dens']))
+            operetta.save_render(r['row'], r['col'], r['fid'], r['id'], max_width=200,
+                                 path=o.ensure_dir(basepath))
 
         patch = PolygonPatch(poly, fc=current_palette[i], ec="#999999", alpha=0.5, zorder=2)
         ax.add_patch(patch)
