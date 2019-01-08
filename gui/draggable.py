@@ -1,11 +1,10 @@
 import matplotlib.patches
-from sympy import symbols, integrate, sqrt, log, asinh, simplify, lambdify, N, pprint, solve
+from sympy import N, asinh, lambdify, log, sqrt, symbols
 from sympy.physics.mechanics import ReferenceFrame
-from sympy.codegen.cfunctions import log10
 import shapely.geometry
-from descartes import PolygonPatch
 import numpy as np
 from sympy.solvers.solvers import nsolve
+
 
 class DraggableCircle:
     def __init__(self, circle):
@@ -106,35 +105,30 @@ class DraggableEightNote:
         if type(ellipseG1) != DraggableEllipse or type(ellipseG2) != DraggableEllipse:
             raise Exception('not a draggable ellipse')
 
-        self.e1=ellipseG1.ellipse
-        self.e2=ellipseG2.ellipse
-        self.c=circleHeight.circle
+        self.e1 = ellipseG1.ellipse
+        self.e2 = ellipseG2.ellipse
+        self.c = circleHeight.circle
 
     @staticmethod
     def s_phase_function(ref, x0=0, y0=0, xf=0, yf=1):
         t = symbols('t', real=True, positive=True)
         _a, _b = symbols('a b', real=True, positive=True)
 
-        fx=t+ _b
-        fy=log(t,10) + _a
+        fx = t + _b
+        fy = log(t, 10) + _a
         f = fx * ref.x + fy * ref.y
 
         # arclength=integrate(sqrt(fx.diff(t)**2+fy.diff(t)**2),t)
         # pprint(N(arclength, 3))
-        arclength=t**2*log(10)/sqrt(t**2*log(10)**2 + 1) - asinh(1/(t*log(10)))/log(10) + 1/(sqrt(t**2*log(10)**2 + 1)*log(10))
+        arclength = t ** 2 * log(10) / sqrt(t ** 2 * log(10) ** 2 + 1) - asinh(1 / (t * log(10))) / log(10) + 1 / (
+                sqrt(t ** 2 * log(10) ** 2 + 1) * log(10))
 
-        # from sympy.solvers.solvers import nsolve
-        # ts = nsolve(arclength,t,0.3)
-        # print(ts)
-        # from sympy.plotting import plot
-        # plot(arclength, (t,0,5))
-
-        a0=yf+np.log(10)/10
-        _dx=10**(y0-a0)
-        b0=x0-_dx
-        f=f.subs({_a:a0,_b:b0})
-        arclength = arclength-arclength.subs(t,_dx)
-        arclength=arclength.subs({_a:a0,_b:b0})
+        a0 = yf + np.log(10) / 10
+        _dx = 10 ** (y0 - a0)
+        b0 = x0 - _dx
+        f = f.subs({_a: a0, _b: b0})
+        arclength = arclength - arclength.subs(t, _dx)
+        arclength = arclength.subs({_a: a0, _b: b0})
 
         # print(arclength)
         # print(f)
@@ -143,86 +137,64 @@ class DraggableEightNote:
         Nn = Tn.diff(t, ref).normalize().simplify()
 
         # evaluation
-        tf=xf-b0
+        tf = xf - b0
         ta = np.linspace(_dx, tf, num=100)
-        f_x=lambdify(t, f.to_matrix(ref)[0])
-        f_y=lambdify(t, f.to_matrix(ref)[1])
-        s=lambdify(t,arclength)
+        f_x = lambdify(t, f.to_matrix(ref)[0])
+        f_y = lambdify(t, f.to_matrix(ref)[1])
+        s = lambdify(t, arclength)
 
         return (f, Tn, Nn, arclength), (f_x, f_y, s), (ta, f_x(ta), f_y(ta), s(ta))
 
     def polygons(self, number_of_sphase_segments=4):
-        xe1,ye1=self.e1.get_center()
-        we1,he1,ae1=self.e1.width, self.e1.height,self.e1.angle
-        xe2,ye2=self.e2.get_center()
-        we2,he2,ae2=self.e2.width, self.e2.height,self.e2.angle
-        xc,yc=self.c.center
+        xe1, ye1 = self.e1.get_center()
+        we1, he1, ae1 = self.e1.width, self.e1.height, self.e1.angle
+        xe2, ye2 = self.e2.get_center()
+        we2, he2, ae2 = self.e2.width, self.e2.height, self.e2.angle
+        xc, yc = self.c.center
 
         # G1 ellipse
-        circ = shapely.geometry.Point((xe1,ye1)).buffer(0.5)
+        circ = shapely.geometry.Point((xe1, ye1)).buffer(0.5)
         ell = shapely.affinity.scale(circ, we1, he1)
-        ellr1 = shapely.affinity.rotate(ell, ae1)
-        yield ellr1
-
+        ellipseG1 = shapely.affinity.rotate(ell, ae1)
+        yield ellipseG1
 
         # G2 ellipse
-        circ = shapely.geometry.Point((xe2,ye2)).buffer(0.5)
+        circ = shapely.geometry.Point((xe2, ye2)).buffer(0.5)
         ell = shapely.affinity.scale(circ, we2, he2)
-        ellr2 = shapely.affinity.rotate(ell, ae2)
-        yield ellr2
+        ellipseG2 = shapely.affinity.rotate(ell, ae2)
 
         t = symbols('t', real=True, positive=True)
         ref = ReferenceFrame('N')
-        # f, tn, nn = s_phase_function(t, N)
-        funcs,lambdas,evals = self.s_phase_function(ref, x0=xe1, y0=ye1, xf=xe2, yf=yc)
+        funcs, lambdas, evals = self.s_phase_function(ref, x0=xe1, y0=ye1, xf=xe2, yf=yc)
         f, tn, nn, s = funcs
-        lamda_fx,lamda_fy,lambda_s = lambdas
-        ta, fx_ev,fy_ev,s_ev = evals
+        lamda_fx, lamda_fy, lambda_s = lambdas
+        ta, fx_ev, fy_ev, s_ev = evals
 
-        h = we1
+        h = we1 / 2
         interior = lambdify(t, (nn * h).to_matrix(ref))
         exterior = lambdify(t, (nn * -h).to_matrix(ref))
 
-        # fy=f.dot(ref.y)
-        # ti=solve(fy-he1,t)
-        # s_ini=lambda_s(nsolve(fy-he1,t,0))
-        # fn=simplify(N(f.dot(ref.y)-he1))
-
-        fn=f.dot(ref.y)-ye1
-        # fn=s-he1
-        # fn_l = lambdify(t,fn)
-        # from scipy.optimize import brentq
-        # root, info = brentq(fy_e1, 0, 1,disp=True,full_output=True)
-        # from scipy.optimize import bisect
-        # root, info = bisect(fy_e1, 1e-30, 1,disp=True,full_output=True)
-        # root2 = np.exp(-15.2302585092994*np.log(10))
-        from sympy.solvers.solvers import nsolve
-        root = float(nsolve(fn,(1e-20,1),solver='bisect', tol=1e-30,verify=False, verbose=False))
-        s_ini=lambda_s(root)
-        # print(info)
-        print(-he1/2-ye1)
+        fn = f.dot(ref.y) - ye1
+        root = float(nsolve(fn, (1e-20, 1), solver='bisect', tol=1e-30, verify=False, verbose=False))
+        s_ini = lambda_s(root)
+        print(-he1 / 2 - ye1)
         print(fn)
-        # print(fn_l(root))
-        print(N(fn.subs(t,root)))
-        # print(fn_l(root2))
-        # print(fy_e1(root3))
-        print(root, lambda_s(root), lamda_fx(root),lamda_fy(root))
+        print(N(fn.subs(t, root)))
+        print(root, lambda_s(root), lamda_fx(root), lamda_fy(root))
         # s_partition=np.arange(s_ini, s_ev[-1], step=(s_ev[-1]-s_ini)/number_of_sphase_segments)
-        s_partition=np.linspace(s_ini, s_ev[-1], num=number_of_sphase_segments)
-        # print(s_ev)
-        # print(s_partition)
+        s_partition = np.linspace(s_ini, s_ev[-1], num=number_of_sphase_segments)
         sti = None
         for k, st in enumerate(s_partition):
-            print(k,st)
+            print(k, st)
             s_ii = np.where(s_ev <= st)[0].max()
-            _ta = ta[s_ii]
+            _ta = ta[s_ii + 1 if s_ii + 1 < ta.size else s_ii]
 
             xi, yi, _ = interior(_ta) + np.array([[lamda_fx(_ta)], [lamda_fy(_ta)], [0]])
             xf, yf, _ = exterior(_ta) + np.array([[lamda_fx(_ta)], [lamda_fy(_ta)], [0]])
 
             if sti is not None:
                 s_ix = np.where((sti <= s_ev) & (s_ev <= st))[0]
-                _ta = ta[np.append(s_ix, s_ix.max() )]
+                _ta = ta[np.append(s_ix, s_ix.max() + 1 if s_ix.max() + 1 < ta.size else s_ix.max())]
                 [xi], [yi], _ = interior(_ta) + np.array([[lamda_fx(_ta)], [lamda_fy(_ta)], [0]])
                 [xf], [yf], _ = exterior(_ta) + np.array([[lamda_fx(_ta)], [lamda_fy(_ta)], [0]])
                 pointList = list()
@@ -230,6 +202,22 @@ class DraggableEightNote:
                 pointList.extend([shapely.geometry.Point(x, y) for x, y in zip(np.flip(xf), np.flip(yf))])
 
                 poly = shapely.geometry.Polygon([(p.x, p.y) for p in pointList])
-                yield poly-ellr1
+                yield poly - ellipseG1
 
             sti = st
+
+        # construct last polygon of S-phase
+        pointList = list()
+        pointList.extend([shapely.geometry.Point(x, y) for x, y in zip(np.flip(xi), np.flip(yi))])
+        re2 = np.radians(ae2)
+        m = np.tan(re2)
+        dx = (we2 / 2 + np.cos(re2)) / 4
+        dy = m * dx
+        pointList.append(shapely.geometry.Point(xe2 - dx, ye2 - dy))
+        pointList.append(shapely.geometry.Point(xe2 + dx, ye2 + dy))
+
+        poly = shapely.geometry.Polygon([(p.x, p.y) for p in pointList])
+        yield poly - ellipseG2
+
+        # yield final ellipse
+        yield ellipseG2
