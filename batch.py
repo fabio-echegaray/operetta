@@ -35,7 +35,7 @@ def batch_process_operetta_folder(path):
                 df['col'] = col
                 outdf = outdf.append(df, ignore_index=True, sort=False)
 
-    pd.to_pickle(outdf, 'out/nuclei.pandas')
+    pd.to_pickle(outdf, o.ensure_dir('out/nuclei.pandas'))
     operetta.files.to_csv('out/operetta.csv')
     return outdf
 

@@ -9,23 +9,30 @@ import seaborn as sns
 from matplotlib.ticker import EngFormatter
 import shapely.geometry
 from descartes import PolygonPatch
-from sympy import symbols
+from sympy import symbols, integrate, sqrt
 from sympy.physics.mechanics import ReferenceFrame
 
 import operetta as o
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger('hhlab')
+logging.getLogger('matplotlib').setLevel(logging.ERROR)
 
 
 def s_phase_function(t, ref):
     from sympy.codegen.cfunctions import log10
+    from sympy import ln
+
+    # a, b = symbols('a b')
+    # fx=t
+    # # fy=ln(t - 2.2) + 17
+    # fy=log10(t - b) + a
+    # f = fx * ref.x + fy * ref.y
+    # # arclength=integrate(sqrt(fx.diff(t)**2+fy.diff(t)**2),t)
 
     f = t * ref.x + (log10(t - 2.2) + 17) * ref.y
     Tn = f.diff(t, ref).normalize().simplify()
     Nn = Tn.diff(t, ref).normalize().simplify()
-    sq = f.to_matrix(ref).applyfunc(lambda x: x ** 2)
-    # length = sympy.sqrt(sq.row(0)+sq.row(1))
     # return lambdify(t, f.to_matrix(N)[1]), lambdify(t, Tn.to_matrix(N)), lambdify(t, Nn.to_matrix(N))
     return lambdify(t, f.to_matrix(ref)[1]), Tn, Nn
 
@@ -166,7 +173,15 @@ def rpe_polygons():
 
 
 if __name__ == '__main__':
-    df = pd.read_pickle('out/nuclei.pandas')
+    out_path = 'rpe'
+    poly_fn = rpe_polygons
+    b_path = '/Volumes/Kidbeat/data/centrosome-dist(rpe)__2018-12-05T18_27_53-Measurement 2'
+
+    out_path = 'u2os'
+    poly_fn = u2os_polygons
+    b_path = '/Volumes/Kidbeat/data/centr-dist(u2os)__2018-11-27T18_08_10-Measurement 1'
+
+    df = pd.read_pickle('{:s}/nuclei.pandas'.format(out_path))
     df = df[df['tubulin_dens'] > 0.5e3]
     df['c_ratio'] = df['c2_int'] / df['c1_int']
     df = df[df['c_ratio'] > 0.6]
@@ -199,58 +214,71 @@ if __name__ == '__main__':
     #                 alpha=.5, palette="PRGn", data=df, ax=ax)
 
     current_palette = sns.color_palette('bright', n_colors=10)
-    # b_path = '/Volumes/Kidbeat/data/centrosome-dist(rpe)__2018-12-05T18_27_53-Measurement 2'
-    # for i, poly in enumerate(rpe_polygons()):
-    b_path = '/Volumes/Kidbeat/data/centr-dist(u2os)__2018-11-27T18_08_10-Measurement 1'
-    operetta = o.Dataframe('out/nuclei.pandas', b_path)
-    for i, poly in enumerate(u2os_polygons()):
+    for i, poly in enumerate(poly_fn()):
+        print(i)
         ix = df['geometry'].apply(lambda g: g.within(poly))
-        df.loc[ix, 'cluster'] = i + 1
+        df.loc[ix, 'cluster'] = i
 
-        basepath = os.path.join(b_path, 'render', '%d' % (i + 1))
-        for i, r in df[ix].iterrows():
-            if os.path.exists(operetta.render_filename(r, basepath)[1]):
-                logger.warning('file exists! %s' % i)
-            logger.debug('rendering %0.2f' % (r['tubulin_dens']))
-            operetta.save_render(r['row'], r['col'], r['fid'], r['id'], max_width=200,
-                                 path=o.ensure_dir(basepath))
+        # basepath = os.path.join(b_path, 'render', '%d' % i)
+        # for k, r in df[ix].iterrows():
+        #     if os.path.exists(operetta.render_filename(r, basepath)[1]):
+        #         logger.warning('file exists! %s' % i)
+        #     logger.debug('rendering %0.2f' % (r['tubulin_dens']))
+        #     operetta.save_render(r['row'], r['col'], r['fid'], r['id'], max_width=200,
+        #                          path=o.ensure_dir(basepath))
 
         patch = PolygonPatch(poly, fc=current_palette[i], ec="#999999", alpha=0.5, zorder=2)
         ax.add_patch(patch)
 
-    fig.savefig('facs.pdf')
-
-    print(df.groupby('cluster').size())
-
-    g = sns.FacetGrid(df[df['cluster'] > 0], row="cluster", height=1.5, aspect=5)
-    g = g.map(sns.distplot, "c1_d_nuc_centr", rug=True)
-    g.savefig('centr-distribution-c.pdf')
-
-    g = sns.FacetGrid(df[df['cluster'] > 0], row="cluster", height=1.5, aspect=5)
-    g = g.map(sns.distplot, "c1_d_nuc_bound", rug=True)
-    g.savefig('centr-distribution-b.pdf')
+    # fig.savefig('{:s}/facs.pdf'.format(out_path))
+    # g2_cluster = df['cluster'].max()
+    #
+    # print(df.groupby('cluster').size())
+    #
+    # df.loc[df['cluster'] == 1, 'phase'] = 'G1'
+    # df.loc[(df['cluster'] > 1) & (df['cluster'] <= 3), 'phase'] = 'Early S'
+    # df.loc[(df['cluster'] > 3) & (df['cluster'] <= g2_cluster - 1), 'phase'] = 'Late S'
+    # df.loc[df['cluster'] == g2_cluster, 'phase'] = 'G2'
+    #
+    # rorder = ['G1', 'Early S', 'Late S', 'G2']
+    # df = df[df['phase'].isin(rorder)]
+    #
+    # g = sns.FacetGrid(df, row="phase", row_order=rorder, height=1.5, aspect=5)
+    # g = g.map(sns.distplot, "c1_d_nuc_centr", rug=True)
+    # g.savefig('{:s}/centr-distribution-nucleus-center.pdf'.format(out_path))
+    #
+    # g = sns.FacetGrid(df, row="phase", row_order=rorder, height=1.5, aspect=5)
+    # g = g.map(sns.distplot, "c1_d_nuc_bound", rug=True)
+    # g.savefig('{:s}/centr-distribution-nucleus-boundary.pdf'.format(out_path))
+    #
+    # g = sns.FacetGrid(df, row="phase", row_order=rorder, height=1.5, aspect=5)
+    # g = g.map(sns.distplot, "c1_d_cell_bound", rug=True)
+    # g.savefig('{:s}/centr-distribution-cell-boundary.pdf'.format(out_path))
+    #
+    # g = sns.FacetGrid(df, row="phase", row_order=rorder, height=1.5, aspect=5)
+    # g = g.map(sns.distplot, "c1_d_c2", rug=True)
+    # g.axes[-1][0].set_xlim([-1,10])
+    # g.savefig('{:s}/centr-distribution-inter-centr.pdf'.format(out_path))
 
     #
     #
     #
-    fig = plt.figure(figsize=(5, 5))
-    ax = fig.gca()
-    sns.scatterplot(x="c1_d_nuc_centr", y="c1_int",
-                    alpha=.5, palette="PRGn", data=df, ax=ax)
-    ax.set_xlabel('distance [um]')
-    ax.set_ylabel('centrosome intensity [AU]')
-    ax.xaxis.set_major_formatter(formatter)
-    ax.yaxis.set_major_formatter(formatter)
-    ax.semilogy()
+    # fig = plt.figure(figsize=(5, 5))
+    # ax = fig.gca()
+    # sns.scatterplot(x="c1_d_nuc_centr", y="c1_int",
+    #                 alpha=.5, palette="PRGn", data=df, ax=ax)
+    # ax.set_xlabel('distance [um]')
+    # ax.set_ylabel('centrosome intensity [AU]')
+    # ax.xaxis.set_major_formatter(formatter)
+    # ax.yaxis.set_major_formatter(formatter)
+    # ax.semilogy()
+    # fig.savefig('centr-intensity.pdf')
 
-    fig.savefig('centr-intensity.pdf')
-
-    df.loc[df['c1_int'] == 65535, 'c1_int'] = 0
-    g = sns.jointplot(x="c1_d_nuc_centr", y="c1_int", data=df,
-                      dropna=True, alpha=0.5)
-    ax = g.ax_joint
-    ax.set_ylim([0, 7500])
-    g.savefig('centr-intensity-joint.pdf')
+    # df.loc[df['c1_int'] == 65535, 'c1_int'] = 0
+    # g = sns.jointplot(x="c1_d_nuc_centr", y="c1_int", data=df,
+    #                   dropna=True, alpha=0.5)
+    # ax = g.ax_joint
+    # g.savefig('centr-intensity-joint.pdf')
 
     plt.show()
 
@@ -273,7 +301,7 @@ if __name__ == '__main__':
         app = QApplication(sys.argv)
 
         egui = ExplorationGui()
-        operetta = o.Dataframe('out/nuclei.pandas', b_path)
+        operetta = o.Dataframe('{:s}/nuclei.pandas'.format(out_path), b_path)
         bgui = BrowseGui(operetta=operetta, exploration_gui=egui)
         # from pycallgraph import PyCallGraph
         # from pycallgraph.output import GraphvizOutput

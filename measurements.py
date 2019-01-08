@@ -208,7 +208,7 @@ def is_valid_sample(tubulin, cell_polygon, nuclei_polygon, nuclei_list=None, pix
         cell_polygon = affinity.scale(cell_polygon, xfact=scale, yfact=scale, origin=(0, 0, 0))
 
     # FIXME: not working
-    if frame.touches(cell_polygon.buffer(2)) or frame.touches(nuclei_polygon.buffer(2)):
+    if frame.crosses(cell_polygon.buffer(2)) or frame.crosses(nuclei_polygon.buffer(2)):
         logger.debug('sample rejected because it was touching the frame')
         return False
     if not cell_polygon.contains(nuclei_polygon):
@@ -280,6 +280,7 @@ def measure_into_dataframe(hoechst, pericentrin, edu, tubulin, nuclei, cells, pi
             cell_bndum = affinity.scale(cell_bnd, xfact=scale, yfact=scale, origin=(0, 0, 0))
 
             lc = 2 if c2 is not None else 1
+            # TODO: Add units support
             d = pd.DataFrame(data={
                 'id': [nucleus['id']],
                 'dna_int': [dna_int],
