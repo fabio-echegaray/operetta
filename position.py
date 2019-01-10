@@ -195,7 +195,7 @@ if __name__ == '__main__':
 
     fig = plt.figure(figsize=(8, 8))
     ax = fig.gca()
-    ax.set_title('distance of the first centrosome with respect to nuleus centroid through cell cycle')
+    ax.set_title('distance of the first centrosome with respect to nucleus centroid through cell cycle')
     ax.set_xlabel('dna [AU]')
     ax.set_ylabel('edu [AU]')
     formatter = EngFormatter(unit='')
