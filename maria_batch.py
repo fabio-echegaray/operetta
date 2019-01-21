@@ -111,7 +111,7 @@ if __name__ == '__main__':
                         help='render images (in a folder called render up in the hierarchy)')
     parser.add_argument('--plot', action='store_true',
                         help='plot all graphs')
-    parser.add_argument('--measure_into_dataframe', action='store_true',
+    parser.add_argument('--measure', action='store_true',
                         help='measure_into_dataframe features on the dataset')
     args = parser.parse_args()
 
@@ -156,7 +156,6 @@ if __name__ == '__main__':
         ax.set_xlim([1, 8])
         ax.set_ylim([12, 18.5])
         ax.set_aspect('equal')
-
 
         df.loc[:, 'phospho_rb_int'] = df['phospho_rb_int'].transform(
             lambda x: (x - x.mean()) / x.std())

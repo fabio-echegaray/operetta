@@ -21,8 +21,9 @@ def ensure_dir(file_path):
 
 
 class Montage:
-    def __init__(self, folder):
+    def __init__(self, folder, row=None, col=None, name=None):
         l = list()
+        self.folder = folder
         self.dir = os.path.join(folder, 'Images')
         #  build a list of dicts for every image file in the directory
         for root, directories, filenames in os.walk(folder):
@@ -35,7 +36,14 @@ class Montage:
                         filename).groups()]
                     i = {'row': row, 'col': col, 'f': f, 'p': p, 'ch': ch, 'sk': sk, 'fk': fk, 'fl': fl}
                     l.append(i)
-        self.files = pd.DataFrame(l)
+        f = pd.DataFrame(l)
+        if row is not None:
+            f = f[f['row'] == row]
+        if col is not None:
+            f = f[f['col'] == col]
+        self.files = f
+        self.name = name
+
         self.um_per_pix = convert_to(1.8983367649421008E-07 * meter / pix, um / pix).n()
         self.pix_per_um = 1 / self.um_per_pix
         self.pix_per_um = float(self.pix_per_um.args[0])
@@ -88,3 +96,16 @@ class Montage:
                 max = np.maximum(max, img)
             channels.append(max)
         return channels
+
+    def save_path(self):
+        if not self.files.empty:
+            if self.name is not None:
+                exp = self.name
+            else:
+                exp = ''
+            return ensure_dir(os.path.join(self.folder, 'out', exp))
+        else:
+            return None
+
+    def save(self):
+        self.files.to_csv(os.path.join(self.save_path(), 'operetta.csv'))

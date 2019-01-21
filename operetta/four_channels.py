@@ -1,30 +1,25 @@
 import logging
-from operetta import Montage
-
 import os
-import numpy as np
-import pandas as pd
-from skimage import color
-from skimage import transform
-from skimage import exposure
-from skimage import io
+
 import shapely.wkt
-from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
-from matplotlib.figure import Figure
+import shapely.wkt
+import shapely.wkt
 import numpy as np
 import pandas as pd
 from skimage import color
-from skimage import transform
 from skimage import exposure
-from skimage import io
 import shapely.wkt
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from matplotlib.figure import Figure
 
+from operetta import Montage
 import measurements as m
-from gui.utils import canvas_to_pil
 from gui.explore import RenderImagesThread
-from gui import convert_to, meter, pix, um
+import operetta as o
+from gui.utils import canvas_to_pil
+
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger('hhlab')
 
 
 class FourChannels(Montage):
@@ -104,7 +99,7 @@ class FourChannels(Montage):
 
             pil = canvas_to_pil(canvas)
             fpath = os.path.join(basepath, 'r%d-c%d-f%d-i%d.jpg' % (row, col, fid, id))
-            pil.save(ensure_dir(fpath))
+            pil.save(o.ensure_dir(fpath))
 
     def max_projection(self, row, col, fid):
         if not self._super_initialized:
@@ -112,27 +107,3 @@ class FourChannels(Montage):
             super().__init__(self.base_path)
             self._super_initialized = True
         return super().max_projection(row, col, fid)
-
-    def save_render(self, row, col, fid, max_width=50):
-        hoechst, tubulin, pericentrin, edu = self.max_projection(row, col, fid)
-
-        hoechst = exposure.equalize_hist(hoechst)
-        tubulin = exposure.equalize_hist(tubulin)
-        pericentrin = exposure.equalize_hist(pericentrin)
-        hoechst = transform.resize(hoechst, (max_width, max_width))
-        tubulin = transform.resize(tubulin, (max_width, max_width))
-        pericentrin = transform.resize(pericentrin, (max_width, max_width))
-
-        hoechst = color.gray2rgb(hoechst)
-        tubulin = color.gray2rgb(tubulin)
-        pericentrin = color.gray2rgb(pericentrin)
-
-        alexa_488 = [.29, 1., 0]
-        alexa_594 = [1., .61, 0]
-        alexa_647 = [.83, .28, .28]
-        hoechst_33342 = [0, .57, 1.]
-        out = hoechst * hoechst_33342 + tubulin * alexa_488 + pericentrin * alexa_594 + edu * alexa_647
-
-        basepath = os.path.dirname(self.dir)
-        path = os.path.abspath(os.path.join(basepath, 'render/%d-%d-%d.jpg' % (fid, row, col)))
-        io.imsave(path, out)
