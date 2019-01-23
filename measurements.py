@@ -298,6 +298,7 @@ def measure_into_dataframe(hoechst, pericentrin, edu, tubulin, nuclei, cells, pi
                 'c2_d_cell_centr': [cell_bndum.centroid.distance(c2['pt']) if twocntr else np.nan],
                 'c1_d_cell_bound': [cell_bndum.exterior.distance(c1['pt']) if c1 is not None else np.nan],
                 'c2_d_cell_bound': [cell_bndum.exterior.distance(c2['pt']) if twocntr else np.nan],
+                'nuc_centr_d_cell_centr': [nucl_bndum.centroid.distance(cell_bndum.centroid)],
                 'c1_d_c2': [c1['pt'].distance(c2['pt']) if twocntr else np.nan],
                 'cell': cell_bndum.wkt,
                 'nucleus': nucl_bndum.wkt,
