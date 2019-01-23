@@ -40,8 +40,8 @@ def batch_process_operetta_folder(path, row=None, col=None, name=None):
                 df['col'] = col
                 outdf = outdf.append(df, ignore_index=True, sort=False)
 
-    pd.to_pickle(outdf, os.path.join(operetta.save_path(), 'nuclei.pandas'))
-    operetta.files.to_csv(os.path.join(operetta.save_path(), 'operetta.csv'))
+    pd.to_pickle(outdf, operetta.save_path(file='nuclei.pandas'))
+    operetta.files.to_csv(operetta.save_path(file='operetta.csv'))
     return outdf
 
 

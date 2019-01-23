@@ -97,13 +97,13 @@ class Montage:
             channels.append(max)
         return channels
 
-    def save_path(self):
+    def save_path(self, file=None):
         if not self.files.empty:
             if self.name is not None:
                 exp = self.name
             else:
                 exp = ''
-            return ensure_dir(os.path.join(self.folder, 'out', exp))
+            return ensure_dir(os.path.join(self.folder, 'out', exp, file))
         else:
             return None
 
