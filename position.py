@@ -199,25 +199,6 @@ if __name__ == '__main__':
     #                 alpha=.5, palette="PRGn", data=df, ax=ax)
 
     current_palette = sns.color_palette('bright', n_colors=10)
-    # b_path = '/Volumes/Kidbeat/data/centrosome-dist(rpe)__2018-12-05T18_27_53-Measurement 2'
-    # for i, poly in enumerate(rpe_polygons()):
-    b_path = '/Volumes/Kidbeat/data/centr-dist(u2os)__2018-11-27T18_08_10-Measurement 1'
-    operetta = o.Dataframe('out/nuclei.pandas', b_path)
-    for i, poly in enumerate(u2os_polygons()):
-        ix = df['geometry'].apply(lambda g: g.within(poly))
-        df.loc[ix, 'cluster'] = i + 1
-
-        basepath = os.path.join(b_path, 'render', '%d' % (i + 1))
-        for i, r in df[ix].iterrows():
-            if os.path.exists(operetta.render_filename(r, basepath)[1]):
-                logger.warning('file exists! %s' % i)
-            logger.debug('rendering %0.2f' % (r['tubulin_dens']))
-            operetta.save_render(r['row'], r['col'], r['fid'], r['id'], max_width=200,
-                                 path=o.ensure_dir(basepath))
-
-        patch = PolygonPatch(poly, fc=current_palette[i], ec="#999999", alpha=0.5, zorder=2)
-        ax.add_patch(patch)
-
     fig.savefig('facs.pdf')
 
     print(df.groupby('cluster').size())
