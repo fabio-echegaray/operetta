@@ -84,8 +84,8 @@ class DraggableEllipse:
 
         contains, attrd = self.ellipse.contains(event)
         if not contains: return
-        print('event contains', self.ellipse.get_center())
-        x0, y0 = self.ellipse.get_center()
+        print('event contains', self.ellipse.center)
+        x0, y0 = self.ellipse.center
         self.press = x0, y0, self.ellipse.width, self.ellipse.height, self.ellipse.angle, event.xdata, event.ydata
 
     def on_motion(self, event):
@@ -95,7 +95,7 @@ class DraggableEllipse:
         x0, y0, w, h, a, xpress, ypress = self.press
         dx = event.xdata - xpress
         dy = event.ydata - ypress
-        self.ellipse.set_center((x0 + dx, y0 + dy))
+        self.ellipse.center = (x0 + dx, y0 + dy)
         self.ellipse.figure.canvas.draw()
 
         # print('x0=%f, xpress=%f, event.xdata=%f, dx=%f, x0+dx=%f' %
@@ -137,24 +137,34 @@ class DraggableEightNote:
         dc.connect()
 
         axcolor = 'lightgoldenrodyellow'
-        axe1 = plt.axes([0.25, 0.1, 0.65, 0.03], facecolor=axcolor)  # [left, bottom, width, height]
-        axe2 = plt.axes([0.25, 0.15, 0.65, 0.03], facecolor=axcolor)
-        axe2 = plt.axes([0.25, 0.2, 0.65, 0.03], facecolor=axcolor)
-        axe2 = plt.axes([0.25, 0.25, 0.65, 0.03], facecolor=axcolor)
+        axe1 = plt.axes([0.25, 0.35, 0.65, 0.03], facecolor=axcolor)  # [left, bottom, width, height]
         axe2 = plt.axes([0.25, 0.3, 0.65, 0.03], facecolor=axcolor)
-        axe2 = plt.axes([0.25, 0.35, 0.65, 0.03], facecolor=axcolor)
+        axe3 = plt.axes([0.25, 0.25, 0.65, 0.03], facecolor=axcolor)
+        axe4 = plt.axes([0.25, 0.2, 0.65, 0.03], facecolor=axcolor)
+        axe5 = plt.axes([0.25, 0.15, 0.65, 0.03], facecolor=axcolor)
+        axe6 = plt.axes([0.25, 0.1, 0.65, 0.03], facecolor=axcolor)
         we1, he1, ae1 = self.e1.width, self.e1.height, self.e1.angle
         we2, he2, ae2 = self.e2.width, self.e2.height, self.e2.angle
-        self.se1 = Slider(axe1, 'Width G1', 0.1, 5.0, valinit=we1)
-        self.se2 = Slider(axe2, 'Width G2', 0.1, 5.0, valinit=we2)
-        self.se1.on_changed(self.update_slider)
-        self.se2.on_changed(self.update_slider)
+        self.we1 = Slider(axe1, 'Width G1', 0.1, 5.0, valinit=we1)
+        self.he1 = Slider(axe2, 'Height G1', 0.1, 5.0, valinit=he1)
+        self.ae1 = Slider(axe3, 'Angle G1', 0, 180, valinit=ae1)
+        self.we2 = Slider(axe4, 'Width G2', 0.1, 5.0, valinit=we2)
+        self.he2 = Slider(axe5, 'Height G2', 0.1, 5.0, valinit=he1)
+        self.ae2 = Slider(axe6, 'Angle G2', 0, 180, valinit=ae1)
+        # self.sw = Slider(axe6, 'S-phase width', 0, 3, valinit=we2/2)
+
+        for slider in [self.we1, self.he1, self.ae1, self.we2, self.he2, self.ae2]:
+            slider.on_changed(self.update_slider)
 
         self.update()
 
     def update_slider(self, val):
-        self.e1.width = self.se1.val
-        self.e2.width = self.se2.val
+        self.e1.width = self.we1.val
+        self.e2.width = self.we2.val
+        self.e1.height = self.he1.val
+        self.e2.height = self.he2.val
+        self.e1.angle = self.ae1.val
+        self.e2.angle = self.ae2.val
         self._ax.figure.canvas.draw()
 
     @staticmethod
@@ -194,9 +204,9 @@ class DraggableEightNote:
         return (f, Tn, Nn, arclength), (f_x, f_y, s), (ta, f_x(ta), f_y(ta), s(ta))
 
     def _calc_polygons(self):
-        xe1, ye1 = self.e1.get_center()
+        xe1, ye1 = self.e1.center
         we1, he1, ae1 = self.e1.width, self.e1.height, self.e1.angle
-        xe2, ye2 = self.e2.get_center()
+        xe2, ye2 = self.e2.center
         we2, he2, ae2 = self.e2.width, self.e2.height, self.e2.angle
         xc, yc = self.c.center
         self._polygons = None
@@ -229,7 +239,7 @@ class DraggableEightNote:
         self.ta, self.fx_ev, self.fy_ev, self.s_ev = ta, fx_ev, fy_ev, s_ev
 
         # use normal vector to the curve to construct inner/outer paths
-        h = we1 / 2
+        h = we1 / 3
         interior = lambdify(t, (nn * h).to_matrix(ref))
         exterior = lambdify(t, (nn * -h).to_matrix(ref))
 
@@ -297,7 +307,7 @@ class DraggableEightNote:
         self.clear()
         self._calc_polygons()
 
-        xe2, ye2 = self.e2.get_center()
+        xe2, ye2 = self.e2.center
         self._ax.plot(self.fx_ev, self.fy_ev)
         # self._ax.scatter(self.fx_ev, self.fy_ev, marker='+')
         self._ax.plot([self._last_x, xe2], [self._last_y, ye2])
