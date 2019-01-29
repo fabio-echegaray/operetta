@@ -18,15 +18,13 @@ logger = logging.getLogger('hhlab')
 logging.getLogger('matplotlib').setLevel(logging.ERROR)
 
 
-def move_images(df, path, folder):
-    render_path = o.ensure_dir(os.path.join(path, 'render'))
-    destination_folder = os.path.join(render_path, folder)
+def move_images(df, render_path, destination_folder):
     os.makedirs(destination_folder, exist_ok=True)
     for i, r in df.iterrows():
-        name, original_path = o.Dataframe.render_filename(r, path)
+        name, original_path = o.FourChannels.render_filename(r, render_path)
         destination_path = os.path.join(destination_folder, name)
         try:
-            logger.warning('moving %s to %s' % (name, folder))
+            logger.info('moving %s to %s' % (name, destination_folder))
             os.rename(original_path, destination_path)
         except Exception:
             logger.warning('no render for %s' % destination_path)
@@ -120,34 +118,23 @@ def write_gate_config(fname, df, ellipse1, ellipse2, circle):
         config.write(configfile)
 
 
-def gate(df, out_basepath, den):
+def _distplot(x, **kwargs):
+    ax = plt.gca()
+    data = kwargs.pop("data")
+    # sns.distplot(data[x], ax=ax, **kwargs)
+    data[x].plot.hist(ax=ax)
+
+
+def gate(df, den):
     if df.empty:
         logger.warning('empty dataset!')
         return
 
     for i, poly in enumerate(den.polygons()):
-        print(i)
         ix = df['geometry'].apply(lambda g: g.within(poly))
         df.loc[ix, 'cluster'] = i
-    rorder = sorted(df["cluster"].unique())
-    print(rorder)
-
-    g = sns.FacetGrid(df, row="cluster", row_order=rorder, height=1.5, aspect=5)
-    g = g.map(sns.distplot, "c1_d_nuc_centr", rug=True)
-    g.savefig('{:s}/centr-distribution-nucleus-center.pdf'.format(out_basepath))
-
-    g = sns.FacetGrid(df, row="cluster", row_order=rorder, height=1.5, aspect=5)
-    g = g.map(sns.distplot, "c1_d_nuc_bound", rug=True)
-    g.savefig('{:s}/centr-distribution-nucleus-boundary.pdf'.format(out_basepath))
-
-    g = sns.FacetGrid(df, row="cluster", row_order=rorder, height=1.5, aspect=5)
-    g = g.map(sns.distplot, "c1_d_cell_bound", rug=True)
-    g.savefig('{:s}/centr-distribution-cell-boundary.pdf'.format(out_basepath))
-
-    g = sns.FacetGrid(df, row="cluster", row_order=rorder, height=1.5, aspect=5)
-    g = g.map(sns.distplot, "c1_d_c2", rug=True)
-    g.axes[-1][0].set_xlim([-1, 10])
-    g.savefig('{:s}/centr-distribution-inter-centr.pdf'.format(out_basepath))
+    df = df[~df["cluster"].isna()]
+    return df
 
 
 if __name__ == '__main__':
@@ -158,10 +145,36 @@ if __name__ == '__main__':
                         help='folder where operetta images reside')
     parser.add_argument('--gate', action='store_true',
                         help='filters groups of data according to cell cycle progression')
+    parser.add_argument('--sort', action='store_true',
+                        help='sort rendered images according to gating')
     args = parser.parse_args()
 
     if not os.path.exists(os.path.join(args.folder, 'out')):
         raise Exception('Folder does not have any analysis in. Make sure you run batch.py first.')
+
+    if args.sort:
+        ax=plt.gca()
+        for root, directories, filenames in os.walk(os.path.join(args.folder, 'out')):
+            for dir in directories:
+                pd_path = os.path.join(args.folder, 'out', dir, 'nuclei.pandas')
+                df = pd.read_pickle(pd_path)
+                render_path = o.ensure_dir(os.path.join(args.folder, 'render'))
+
+                df["geometry"] = df.apply(
+                    lambda row: shapely.geometry.Point(row['dna_int'] / 1e6 / 6, np.log(row['edu_int'])),
+                    axis=1)
+
+                cfg_path = os.path.join(args.folder, 'out', dir, 'gate.cfg')
+                ellipse1, ellipse2, circle, rows, cols = read_gate_config(cfg_path)
+                den = DraggableEightNote(ax, ellipse1, ellipse2, circle, number_of_sphase_segments=4)
+                write_gate_config(cfg_path, df, ellipse1, ellipse2, circle)
+                df = gate(df, den)
+
+                for ix, dfg in df.groupby("cluster"):
+                    _path = os.path.join(args.folder, 'out', dir, 'render', str(int(ix)))
+                    dest_path = o.ensure_dir(_path)
+
+                    move_images(dfg, render_path=render_path, destination_folder=dest_path)
 
     if args.gate:
         for root, directories, filenames in os.walk(os.path.join(args.folder, 'out')):
@@ -198,34 +211,14 @@ if __name__ == '__main__':
                 plt.show()
                 logger.info('gating...')
                 write_gate_config(cfg_path, df, ellipse1, ellipse2, circle)
-                gate(df, os.path.join(args.folder, 'out', dir), den)
+                dfg = gate(df, den)
 
-    if False:
-        import sys
-        from PyQt4.QtCore import *
-        from PyQt4.QtGui import QApplication
-        from gui.explore import ExplorationGui
-        from gui.browse import BrowseGui
+                rorder = sorted(dfg["cluster"].unique())
+                dfg = dfg.melt(id_vars=["row", "col", "cluster"])
+                corder = ["c1_d_nuc_centr", "c1_d_nuc_bound", "c1_d_cell_bound", "nuc_centr_d_cell_centr"]
+                dfg = dfg[dfg["variable"].isin(corder)]
 
-        b_path = '/Volumes/Kidbeat/data/centr-dist(u2os)__2018-11-27T18_08_10-Measurement 1/'
-
-        base_path = os.path.abspath('%s' % os.getcwd())
-        logging.info('Qt version:' + QT_VERSION_STR)
-        logging.info('PyQt version:' + PYQT_VERSION_STR)
-        logging.info('Working dir:' + os.getcwd())
-        logging.info('Base dir:' + base_path)
-        os.chdir(base_path)
-
-        app = QApplication(sys.argv)
-
-        egui = ExplorationGui()
-        operetta = o.Dataframe('{:s}/nuclei.pandas'.format(out_path), b_path)
-        bgui = BrowseGui(operetta=operetta, exploration_gui=egui)
-        # from pycallgraph import PyCallGraph
-        # from pycallgraph.output import GraphvizOutput
-        #
-        # with PyCallGraph(output=GraphvizOutput()):
-        bgui.show()
-        egui.show()
-        code = app.exec_()
-        sys.exit(code)
+                out_path = os.path.join(args.folder, 'out', dir)
+                g = sns.FacetGrid(dfg, row="cluster", row_order=rorder, col="variable", height=1.5, aspect=3)
+                g = g.map_dataframe(_distplot, "value", rug=True)
+                g.savefig('{:s}/distribution-across-cc.pdf'.format(out_path))

@@ -1,5 +1,6 @@
 import logging
 import os
+import sys
 import re
 
 import numpy as np
@@ -25,22 +26,31 @@ class Montage:
         l = list()
         self.folder = folder
         self.dir = os.path.join(folder, 'Images')
+        if not os.path.exists(self.dir):
+            raise FileNotFoundError('Images folder is not in the structure.')
+
         #  build a list of dicts for every image file in the directory
         for root, directories, filenames in os.walk(folder):
             for filename in filenames:
                 ext = filename.split('.')[-1]
                 if ext == 'tiff':
                     # joinf = os.path.join(root, filename)
-                    row, col, f, p, ch, sk, fk, fl = [int(g) for g in re.search(
+                    _row, _col, f, p, ch, sk, fk, fl = [int(g) for g in re.search(
                         'r([0-9]+)c([0-9]+)f([0-9]+)p([0-9]+)-ch([0-9]+)sk([0-9]+)fk([0-9]+)fl([0-9]+).tiff',
                         filename).groups()]
-                    i = {'row': row, 'col': col, 'f': f, 'p': p, 'ch': ch, 'sk': sk, 'fk': fk, 'fl': fl}
+                    i = {'row': _row, 'col': _col, 'f': f, 'p': p, 'ch': ch, 'sk': sk, 'fk': fk, 'fl': fl}
                     l.append(i)
         f = pd.DataFrame(l)
+        logger.info('original rows: %s' % f['row'].unique())
+        logger.info('original columns: %s' % f['col'].unique())
         if row is not None:
+            logger.debug('restricting rows to %s' % row)
             f = f[f['row'] == row]
         if col is not None:
+            logger.debug('restricting columns to %s' % col)
             f = f[f['col'] == col]
+        logger.info('rows: %s' % f['row'].unique())
+        logger.info('columns: %s' % f['col'].unique())
         self.files = f
         self.name = name
 
@@ -89,12 +99,17 @@ class Montage:
                 if z.index.size == 1:
                     files.append(self.filename(z))
             first_file = os.path.join(self.dir, files.pop())
-            max = io.imread(first_file)
-            for f in files:
-                fname = os.path.join(self.dir, f)
-                img = io.imread(fname)
-                max = np.maximum(max, img)
-            channels.append(max)
+            try:
+                max = io.imread(first_file)
+                for f in files:
+                    fname = os.path.join(self.dir, f)
+                    img = io.imread(fname)
+                    max = np.maximum(max, img)
+                channels.append(max)
+            except Exception as e:
+                print(e)
+                print(sys.exc_type)
+
         return channels
 
     def save_path(self, file=None):

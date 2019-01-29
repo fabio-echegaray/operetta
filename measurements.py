@@ -17,6 +17,7 @@ import skimage.transform as tf
 from shapely.geometry.point import Point
 from shapely.geometry.polygon import Polygon
 from shapely import affinity
+from scipy.ndimage.morphology import distance_transform_edt
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger('hhlab')
@@ -85,7 +86,11 @@ def nuclei_segmentation(image, radius=30):
     thresh = image >= thresh_val
     thresh = morphology.remove_small_holes(thresh)
     thresh = morphology.remove_small_objects(thresh)
-    # thresh = morphology.closing(image > thresh, morphology.square(3))
+
+    thresh = distance_transform_edt(thresh)
+    thresh = filters.gaussian(thresh, sigma=0.2)
+    thresh_val = filters.threshold_otsu(thresh)
+    thresh = thresh >= thresh_val
 
     # remove artifacts connected to image border
     cleared = segmentation.clear_border(thresh)

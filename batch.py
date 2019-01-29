@@ -1,11 +1,11 @@
 import logging
 import os
+import traceback
 
 from shapely.geometry.polygon import Polygon
 import matplotlib.pyplot as plt
 from matplotlib.ticker import EngFormatter
 import shapely.geometry
-import shapely.wkt
 import shapely.wkt
 
 logging.basicConfig(level=logging.DEBUG)
@@ -17,28 +17,31 @@ def batch_process_operetta_folder(path, row=None, col=None, name=None):
     operetta = o.Montage(path, row=row, col=col, name=name)
     outdf = pd.DataFrame()
     for row, col, fid in operetta.stack_generator():
-        hoechst, tubulin, pericentrin, edu = operetta.max_projection(row, col, fid)
-        r = 30  # [um]
-        pix_per_um = operetta.pix_per_um
+        try:
+            hoechst, tubulin, pericentrin, edu = operetta.max_projection(row, col, fid)
+            r = 30  # [um]
+            pix_per_um = operetta.pix_per_um
 
-        imgseg = m.nuclei_segmentation(hoechst, radius=r * pix_per_um)
-        n_nuclei = len(np.unique(imgseg))
-        operetta.add_mesurement(row, col, fid, 'nuclei found', n_nuclei)
+            imgseg = m.nuclei_segmentation(hoechst, radius=r * pix_per_um)
+            n_nuclei = len(np.unique(imgseg))
+            operetta.add_mesurement(row, col, fid, 'nuclei found', n_nuclei)
 
-        if n_nuclei > 1:
-            # self.nuclei_features = m.nuclei_features(imgseg, area_thresh=(r * self.resolution) ** 2 * np.pi)
-            nuclei = m.nuclei_features(imgseg)
-            for i, n in enumerate(nuclei):
-                n['id'] = i
+            if n_nuclei > 1:
+                # self.nuclei_features = m.nuclei_features(imgseg, area_thresh=(r * pix_per_um) ** 2 * np.pi)
+                nuclei = m.nuclei_features(imgseg)
+                for i, n in enumerate(nuclei):
+                    n['id'] = i
 
-            cells, _ = m.cell_boundary(tubulin, hoechst)
+                cells, _ = m.cell_boundary(tubulin, hoechst)
 
-            samples, df = m.measure_into_dataframe(hoechst, pericentrin, edu, tubulin, nuclei, cells, pix_per_um)
-            if len(df) > 0:
-                df['fid'] = fid
-                df['row'] = row
-                df['col'] = col
-                outdf = outdf.append(df, ignore_index=True, sort=False)
+                samples, df = m.measure_into_dataframe(hoechst, pericentrin, edu, tubulin, nuclei, cells, pix_per_um)
+                if len(df) > 0:
+                    df['fid'] = fid
+                    df['row'] = row
+                    df['col'] = col
+                    outdf = outdf.append(df, ignore_index=True, sort=False)
+        except Exception as e:
+            traceback.print_stack()
 
     pd.to_pickle(outdf, operetta.save_path(file='nuclei.pandas'))
     operetta.files.to_csv(operetta.save_path(file='operetta.csv'))
@@ -82,6 +85,9 @@ if __name__ == '__main__':
         source ~/py36/bin/activate
     """
     if args.measure:
+        logger.debug(args.folder)
+        logger.debug(args.column)
+        logger.debug(args.name)
         df = batch_process_operetta_folder(args.folder, col=args.column, name=args.name)
 
     if args.render:

@@ -98,7 +98,8 @@ class FourChannels(Montage):
                                           xlim=[minx - 20, maxx + 20], ylim=[miny - 20, maxy + 20])
 
                 pil = canvas_to_pil(canvas)
-                fpath = os.path.join(basepath, 'r%d-c%d-f%d-i%d.jpg' % (row, col, fid, ix))
+                name = 'r%d-c%d-f%d-i%d.jpg' % (row, col, fid, ix)
+                fpath = os.path.abspath(os.path.join(basepath, name))
                 pil.save(o.ensure_dir(fpath))
 
     def max_projection(self, row, col, fid):
