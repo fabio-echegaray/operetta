@@ -2,11 +2,7 @@ import logging
 import os
 import traceback
 
-from shapely.geometry.polygon import Polygon
 import matplotlib.pyplot as plt
-from matplotlib.ticker import EngFormatter
-import shapely.geometry
-import shapely.wkt
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger('hhlab')
@@ -19,16 +15,14 @@ def batch_process_operetta_folder(path, row=None, col=None, name=None):
     for row, col, fid in operetta.stack_generator():
         try:
             hoechst, tubulin, pericentrin, edu = operetta.max_projection(row, col, fid)
-            r = 30  # [um]
+            r = 10  # [um]
             pix_per_um = operetta.pix_per_um
 
-            imgseg = m.nuclei_segmentation(hoechst, radius=r * pix_per_um)
+            imgseg, nuclei = m.nuclei_segmentation(hoechst, radius=r * pix_per_um)
             n_nuclei = len(np.unique(imgseg))
-            operetta.add_mesurement(row, col, fid, 'nuclei found', n_nuclei)
-
             if n_nuclei > 1:
-                # self.nuclei_features = m.nuclei_features(imgseg, area_thresh=(r * pix_per_um) ** 2 * np.pi)
-                nuclei = m.nuclei_features(imgseg)
+                operetta.add_mesurement(row, col, fid, 'nuclei found', n_nuclei)
+
                 for i, n in enumerate(nuclei):
                     n['id'] = i
 
@@ -40,7 +34,8 @@ def batch_process_operetta_folder(path, row=None, col=None, name=None):
                     df['row'] = row
                     df['col'] = col
                     outdf = outdf.append(df, ignore_index=True, sort=False)
-        except Exception as e:
+        except o.NoSamplesError as e:
+            logger.error(e)
             traceback.print_stack()
 
     pd.to_pickle(outdf, operetta.save_path(file='nuclei.pandas'))
@@ -76,6 +71,7 @@ if __name__ == '__main__':
     import pandas as pd
 
     import measurements as m
+    import plots as p
     import operetta as o
 
     """
@@ -85,6 +81,7 @@ if __name__ == '__main__':
         source ~/py36/bin/activate
     """
     if args.measure:
+        logger.debug('------------------------- MEASURING -------------------------')
         logger.debug(args.folder)
         logger.debug(args.column)
         logger.debug(args.name)
@@ -93,8 +90,11 @@ if __name__ == '__main__':
     if args.render:
         for root, directories, filenames in os.walk(os.path.join(args.folder, 'out')):
             for dir in directories:
-                pd_path = os.path.join(args.folder, 'out', dir, 'nuclei.pandas')
-                batch_render(pd_path, args.folder)
+                try:
+                    pd_path = os.path.join(args.folder, 'out', dir, 'nuclei.pandas')
+                    batch_render(pd_path, args.folder)
+                except o.NoSamplesError as e:
+                    logger.error(e)
 
     if args.plot:
         pd_path = os.path.join(args.folder, 'out/nuclei.pandas')
@@ -103,25 +103,7 @@ if __name__ == '__main__':
         df.to_csv(pd_path)
         print(df)
 
-        df["geometry"] = df.apply(lambda row: shapely.geometry.Point(row['dna_int'] / 1e6 / 6, np.log(row['edu_int'])),
-                                  axis=1)
-        df["cluster"] = -1
-
         fig = plt.figure(figsize=(8, 8))
-        ax = fig.gca()
-        ax.set_xlabel('dna [AU]')
-        ax.set_ylabel('edu [AU]')
-        formatter = EngFormatter(unit='')
-        ax.xaxis.set_major_formatter(formatter)
-        ax.yaxis.set_major_formatter(formatter)
-        ax.set_xlim([1, 8])
-        ax.set_ylim([12, 18.5])
-        ax.set_aspect('equal')
-
-        df.loc[:, 'phospho_rb_int'] = df['phospho_rb_int'].transform(
-            lambda x: (x - x.mean()) / x.std())
-
-        map = ax.scatter(df['dna_int'] / 1e6 / 6, np.log(df['edu_int']), c=df['phospho_rb_int'], alpha=0.1)
-
+        p.facs(df, ax=fig.gca())
         path = o.ensure_dir(os.path.join(args.folder, 'out/graphs/facs.pdf'))
         fig.savefig(path)

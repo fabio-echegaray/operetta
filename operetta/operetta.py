@@ -84,7 +84,9 @@ class Montage:
         group = self.files.groupby(['row', 'col', 'f'])
         l = len(group)
         for k, (ig, g) in enumerate(group):
-            logger.info('stack generator: retrieving %d of %d - row=%d col=%d fid=%d' % (k, l, ig[0], ig[1], ig[2]))
+            row, col, fid = ig
+            # if not (row == 1 and col == 9 and fid == 72): continue
+            logger.info('stack generator: retrieving %d of %d - row=%d col=%d fid=%d' % (k, l, row, col, fid))
             yield ig
 
     def add_mesurement(self, row, col, f, name, value):
@@ -107,8 +109,7 @@ class Montage:
                     max = np.maximum(max, img)
                 channels.append(max)
             except Exception as e:
-                print(e)
-                print(sys.exc_type)
+                logger.error(e)
 
         return channels
 

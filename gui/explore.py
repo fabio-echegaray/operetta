@@ -11,6 +11,8 @@ from matplotlib.ticker import EngFormatter
 from shapely.geometry.polygon import Polygon
 from matplotlib.figure import SubplotParams
 
+import plots as p
+
 try:
     from PIL.ImageQt import ImageQt
     from PyQt4 import QtCore, uic
@@ -27,7 +29,7 @@ except ImportError:  # if calling from batch and system doesn't have GUI capabil
     pass
 
 from . import utils
-from . import SUSSEX_CORAL_RED, SUSSEX_NAVY_BLUE, convert_to, meter, pix, um
+from . import convert_to, meter, pix, um
 import measurements as m
 
 logging.basicConfig(level=logging.DEBUG)
@@ -84,14 +86,10 @@ class RenderImagesThread(QThread):
 
     @staticmethod
     def render(ax, nucleus, cell, centrosomes, pix_per_um=1, xlim=None, ylim=None):
-        ax.set_aspect('equal')
-        ax.set_axis_off()
+        p.render_cell(nucleus, cell, centrosomes, ax=ax)
         l, b, w, h = ax.get_figure().bbox.bounds
 
-        x, y = nucleus.exterior.xy
         cen = nucleus.centroid
-        ax.plot(x, y, color='red', linewidth=1, solid_capstyle='round', zorder=2)
-        ax.plot(cen.x, cen.y, color='red', marker='+', linewidth=1, solid_capstyle='round', zorder=2)
 
         if xlim is not None and ylim is not None:
             ax.set_xlim(xlim)
@@ -108,25 +106,6 @@ class RenderImagesThread(QThread):
             y0, yf = cen.y - h / 2, cen.y + h / 2
             x0 = max(0, x0) + 5 * pix_per_um
             y0 = max(0, y0) + 5 * pix_per_um
-
-        if cell is not None:
-            x, y = cell.exterior.xy
-            ax.plot(x, y, color='yellow', linewidth=1, solid_capstyle='round', zorder=1)
-            cenc = cell.centroid
-            ax.plot(cenc.x, cenc.y, color='yellow', marker='+', linewidth=1, solid_capstyle='round', zorder=2)
-
-        if centrosomes is not None:
-            c1, c2 = centrosomes
-            if c1 is not None:
-                c = plt.Circle((c1.x, c1.y), radius=2, facecolor='none', edgecolor=SUSSEX_CORAL_RED,
-                               linewidth=2, zorder=5)
-                ax.add_artist(c)
-                ax.plot([c1.x, cen.x], [c1.y, cen.y], color='gray', linewidth=1, zorder=2)
-                ax.text(c1.x, c1.y, '%0.2f' % (c1.distance(cen)), color='w', zorder=10)
-            if c2 is not None:
-                c = plt.Circle((c2.x, c2.y), radius=2, facecolor='none', edgecolor=SUSSEX_NAVY_BLUE,
-                               linewidth=2, zorder=5)
-                ax.add_artist(c)
 
         ax.plot([x0, x0 + 10 * pix_per_um], [y0, y0], c='w', lw=4)
         ax.text(x0 + 1 * pix_per_um, y0 + 1.5 * pix_per_um, '10 um', color='w')

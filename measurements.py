@@ -16,7 +16,7 @@ import skimage.segmentation as segmentation
 import skimage.transform as tf
 from shapely.geometry.point import Point
 from shapely.geometry.polygon import Polygon
-from shapely import affinity
+from shapely import affinity, wkt
 from scipy.ndimage.morphology import distance_transform_edt
 
 logging.basicConfig(level=logging.DEBUG)
@@ -74,54 +74,58 @@ def integral_over_surface(image, polygon):
         return np.nan
 
 
-def nuclei_segmentation(image, radius=30):
-    # image_gray = color.rgb2gray(image)
-    # blobs_log = feature.blob_log(image_gray, min_sigma=0.8 * radius, max_sigma=1.2 * radius, num_sigma=10, threshold=.1)
-    # # Compute radii in the 3rd column.
-    # blobs_log[:, 2] = blobs_log[:, 2] * sqrt(2)
-
+def nuclei_segmentation(image, radius=10):
     # apply threshold
-    logger.info('thresholding images')
+    logger.debug('thresholding images')
     thresh_val = filters.threshold_otsu(image)
     thresh = image >= thresh_val
     thresh = morphology.remove_small_holes(thresh)
     thresh = morphology.remove_small_objects(thresh)
 
-    thresh = distance_transform_edt(thresh)
-    thresh = filters.gaussian(thresh, sigma=0.2)
-    thresh_val = filters.threshold_otsu(thresh)
-    thresh = thresh >= thresh_val
-
     # remove artifacts connected to image border
     cleared = segmentation.clear_border(thresh)
-    label_image = measure.label(cleared)
 
-    return label_image
+    if len(cleared[cleared > 0]) == 0: return None, None
 
+    # logger.debug('computing Lapacian of Gaussian for image')
+    # image = exposure.equalize_hist(image)  # improves detection
+    # image_gray = color.rgb2gray(image)
+    # markers = np.zeros(image.shape, dtype=np.int8)
+    # points = feature.blob_log(image_gray, min_sigma=0.8 * radius, max_sigma=radius, num_sigma=10, threshold=.1)
+    # # points = feature.blob_dog(image_gray, min_sigma=0.5 * radius, max_sigma=radius, threshold=1.0)
+    # print(points)
+    # if len(points) == 0:
+    #     logger.info('no nuclei found for current stack')
+    #     return None, None
+    # for k, (r, c, sg) in enumerate(points, start=1):
+    #     markers[int(r), int(c)] = k
 
-def nuclei_features(image, ax=None, area_thresh=100):
+    distance = distance_transform_edt(cleared)
+    local_maxi = feature.peak_local_max(distance, indices=False, labels=cleared,
+                                        min_distance=radius / 4, exclude_border=False)
+    markers, num_features = ndi.label(local_maxi)
+    if num_features == 0:
+        logger.info('no nuclei found for current stack')
+        return None, None
+
+    labels = morphology.watershed(-distance, markers, watershed_line=True, mask=cleared)
+
     logger.info('nuclei_features')
 
-    def polygon_area(x, y):
-        return 0.5 * np.abs(np.dot(x, np.roll(y, 1)) - np.dot(y, np.roll(x, 1)))
-
-    # Display the image and plot all contours found
-    contours = measure.find_contours(image, 0.9)
+    # store all contours found
+    contours = measure.find_contours(labels, 0.9)
     tform = tf.SimilarityTransform(rotation=math.pi / 2)
 
     _list = list()
     for k, contr in enumerate(contours):
-        if polygon_area(contr[:, 0], contr[:, 1]) > area_thresh:
-            contr = tform(contr)
-            contr[:, 0] *= -1
-            _list.append({
-                'id': k,
-                'boundary': Polygon(contr)
-            })
-            if ax is not None:
-                ax.plot(contr[:, 1], contr[:, 0], linewidth=1)
+        contr = tform(contr)
+        contr[:, 0] *= -1
+        _list.append({
+            'id': k,
+            'boundary': Polygon(contr)
+        })
 
-    return _list
+    return labels, _list
 
 
 def centrosomes(image, max_sigma=1):
@@ -213,7 +217,7 @@ def is_valid_sample(tubulin, cell_polygon, nuclei_polygon, nuclei_list=None, pix
         cell_polygon = affinity.scale(cell_polygon, xfact=scale, yfact=scale, origin=(0, 0, 0))
 
     # FIXME: not working
-    if frame.crosses(cell_polygon.buffer(2)) or frame.crosses(nuclei_polygon.buffer(2)):
+    if frame.touches(nuclei_polygon.buffer(2)):
         logger.debug('sample rejected because it was touching the frame')
         return False
     if not cell_polygon.contains(nuclei_polygon):
@@ -236,6 +240,16 @@ def is_valid_sample(tubulin, cell_polygon, nuclei_polygon, nuclei_list=None, pix
                 n_nuc += 1
         if n_nuc != 1:
             return False
+
+    return True
+
+
+def is_valid_measured_row(row):
+    if row['centrosomes'] < 1: return False
+    if row['tubulin_dens'] < 0.5e3: return False
+    if np.isnan(row['c1_int']): return False
+    if row['c2_int'] / row['c1_int'] < 0.6: return False
+    if wkt.loads(row['nucleus']).area < 5 ** 2 * np.pi: return False
 
     return True
 
@@ -281,10 +295,10 @@ def measure_into_dataframe(hoechst, pericentrin, edu, tubulin, nuclei, cells, pi
             edu_int = integral_over_surface(edu, nucl_bnd)
             dna_int = integral_over_surface(hoechst, nucl_bnd)
 
-            nucl_bndum = affinity.scale(nucl_bnd, xfact=scale, yfact=scale, origin=(0, 0, 0))
-            cell_bndum = affinity.scale(cell_bnd, xfact=scale, yfact=scale, origin=(0, 0, 0))
+            nucl_bndum = affinity.scale(nucl_bnd, xfact=scale, yfact=scale, origin=(0, 0, 0))  # in um
+            cell_bndum = affinity.scale(cell_bnd, xfact=scale, yfact=scale, origin=(0, 0, 0))  # in um
 
-            lc = 2 if c2 is not None else 1
+            lc = 2 if c2 is not None else 1 if c1 is not None else np.nan
             # TODO: Add units support
             d = pd.DataFrame(data={
                 'id': [nucleus['id']],

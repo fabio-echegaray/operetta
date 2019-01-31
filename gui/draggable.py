@@ -301,6 +301,7 @@ class DraggableEightNote:
         # self._ax.artists = []
         # self._ax.collections = []
         self._ax.lines = []
+        self._ax.texts = []
         self._ax.patches = []
 
     def update(self):
@@ -315,6 +316,7 @@ class DraggableEightNote:
         current_palette = sns.color_palette('bright', n_colors=10)
         for i, p in enumerate(self._polygons):
             patch = PolygonPatch(p, fc=current_palette[i], ec="#999999", alpha=0.5, zorder=2)
+            self._ax.text(p.centroid.x, p.centroid.y, i, fontsize=12, color='white')
             self._ax.add_patch(patch)
 
         self._ax.figure.canvas.draw()
