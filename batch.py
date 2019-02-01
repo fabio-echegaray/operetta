@@ -89,12 +89,19 @@ if __name__ == '__main__':
 
     if args.render:
         for root, directories, filenames in os.walk(os.path.join(args.folder, 'out')):
-            for dir in directories:
+            pd_path = os.path.join(root, 'nuclei.pandas')
+            if os.path.exists(pd_path):
                 try:
-                    pd_path = os.path.join(args.folder, 'out', dir, 'nuclei.pandas')
                     batch_render(pd_path, args.folder)
                 except o.NoSamplesError as e:
                     logger.error(e)
+            else:
+                for dir in directories:
+                    pd_path = os.path.join(args.folder, 'out', dir, 'nuclei.pandas')
+                    try:
+                        batch_render(pd_path, args.folder)
+                    except o.NoSamplesError as e:
+                        logger.error(e)
 
     if args.plot:
         pd_path = os.path.join(args.folder, 'out/nuclei.pandas')

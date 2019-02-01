@@ -138,6 +138,78 @@ def gate(df, den):
     return df
 
 
+def apply_gate_to_folder(pd_path, out_path):
+    df = pd.read_pickle(pd_path)
+    df = df[df.apply(m.is_valid_measured_row, axis=1)]
+    # print(df.groupby(['fid', 'row', 'col', 'id']).size())
+    # print(len(df.groupby(['fid', 'row', 'col', 'id']).size()))
+
+    df["geometry"] = df.apply(
+        lambda row: shapely.geometry.Point(row['dna_int'] / 1e6 / 6, np.log(row['edu_int'])),
+        axis=1)
+
+    fig = plt.figure()
+    ax = fig.gca()
+    ax.set_aspect('equal')
+
+    cidkeyboard = ax.figure.canvas.mpl_connect('key_press_event', on_key)
+
+    cfg_path = os.path.join(out_path, 'gate.cfg')
+    ellipse1, ellipse2, circle, rows, cols = read_gate_config(cfg_path)
+    if not (len(rows) == 0 or len(cols) == 0):
+        df = df[(df["row"].isin(rows)) & (df["col"].isin(cols))]
+    map = ax.scatter(df['dna_int'] / 1e6 / 6, np.log(df['edu_int']), c=df['c1_d_nuc_bound'], alpha=1)
+
+    den = DraggableEightNote(ax, ellipse1, ellipse2, circle, number_of_sphase_segments=4)
+    ax.set_title(dir)
+    fig.subplots_adjust(top=0.99, bottom=0.3)
+
+    plt.show()
+    logger.info('gating...')
+    # Save just the portion _inside_ the second axis's boundaries
+    extent = ax.get_window_extent().transformed(fig.dpi_scale_trans.inverted())
+    fig.savefig('{:s}/gate.png'.format(out_path), bbox_inches=extent)
+
+
+    write_gate_config(cfg_path, df, ellipse1, ellipse2, circle)
+    dfg = gate(df, den)
+    rorder = sorted(dfg["cluster"].unique())
+
+    g = sns.FacetGrid(df, row="cluster", row_order=rorder, height=1.5, aspect=5)
+    g = g.map(sns.distplot, "c1_d_nuc_centr", rug=True)
+    g.axes[-1][0].set_xlim([-1, 20])
+    g.savefig('{:s}/centr-distribution-nucleus-center.pdf'.format(out_path))
+
+    g = sns.FacetGrid(df, row="cluster", row_order=rorder, height=1.5, aspect=5)
+    g = g.map(sns.distplot, "c1_d_nuc_bound", rug=True)
+    g.axes[-1][0].set_xlim([-1, 20])
+    g.savefig('{:s}/centr-distribution-nucleus-boundary.pdf'.format(out_path))
+
+    g = sns.FacetGrid(df, row="cluster", row_order=rorder, height=1.5, aspect=5)
+    g = g.map(sns.distplot, "c1_d_cell_bound", rug=True)
+    g.axes[-1][0].set_xlim([-1, 30])
+    g.savefig('{:s}/centr-distribution-cell-boundary.pdf'.format(out_path))
+
+    g = sns.FacetGrid(df, row="cluster", row_order=rorder, height=1.5, aspect=5)
+    g = g.map(sns.distplot, "nuc_centr_d_cell_centr", rug=True)
+    g.axes[-1][0].set_xlim([-1, 20])
+    g.savefig('{:s}/centr-distribution-nuc-cell.pdf'.format(out_path))
+
+    g = sns.FacetGrid(df, row="cluster", row_order=rorder, height=1.5, aspect=5)
+    g = g.map(sns.distplot, "c1_d_c2", rug=True)
+    g.axes[-1][0].set_xlim([-1, 10])
+    g.savefig('{:s}/centr-distribution-inter-centr.pdf'.format(out_path))
+
+    # rorder = sorted(dfg["cluster"].unique())
+    # dfg = dfg.melt(id_vars=["row", "col", "cluster"])
+    # corder = ["c1_d_nuc_centr", "c1_d_nuc_bound", "c1_d_cell_bound", "nuc_centr_d_cell_centr"]
+    # dfg = dfg[dfg["variable"].isin(corder)]
+    #
+    # g = sns.FacetGrid(dfg, row="cluster", row_order=rorder, col="variable", height=1.5, aspect=3)
+    # g = g.map_dataframe(_distplot, "value", rug=True)
+    # g.savefig('{:s}/distribution-across-cc.pdf'.format(out_path))
+
+
 if __name__ == '__main__':
     import argparse
 
@@ -180,81 +252,15 @@ if __name__ == '__main__':
 
     if args.gate:
         for root, directories, filenames in os.walk(os.path.join(args.folder, 'out')):
-            for dir in directories:
-                if dir == 'render': continue
-                pd_path = os.path.join(args.folder, 'out', dir, 'nuclei.pandas')
-                out_path = os.path.join(args.folder, 'out', dir)
-                if not os.path.exists(pd_path):
-                    logger.error('%s not found!' % pd_path)
-                    continue
-
-                df = pd.read_pickle(pd_path)
-                df = df[df.apply(m.is_valid_measured_row, axis=1)]
-
-                print(df.groupby(['fid', 'row', 'col', 'id']).size())
-                print(len(df.groupby(['fid', 'row', 'col', 'id']).size()))
-
-                df["geometry"] = df.apply(
-                    lambda row: shapely.geometry.Point(row['dna_int'] / 1e6 / 6, np.log(row['edu_int'])),
-                    axis=1)
-
-                fig = plt.figure()
-                ax = fig.gca()
-                ax.set_aspect('equal')
-
-                cidkeyboard = ax.figure.canvas.mpl_connect('key_press_event', on_key)
-
-                cfg_path = os.path.join(args.folder, 'out', dir, 'gate.cfg')
-                ellipse1, ellipse2, circle, rows, cols = read_gate_config(cfg_path)
-                if not (len(rows) == 0 or len(cols) == 0):
-                    df = df[(df["row"].isin(rows)) & (df["col"].isin(cols))]
-                map = ax.scatter(df['dna_int'] / 1e6 / 6, np.log(df['edu_int']), c=df['c1_d_nuc_bound'], alpha=1)
-
-                den = DraggableEightNote(ax, ellipse1, ellipse2, circle, number_of_sphase_segments=4)
-                ax.set_title(dir)
-                fig.subplots_adjust(top=0.99, bottom=0.3)
-
-                # Save just the portion _inside_ the second axis's boundaries
-                extent = ax.get_window_extent().transformed(fig.dpi_scale_trans.inverted())
-                fig.savefig('{:s}/gate.png'.format(out_path), bbox_inches=extent)
-
-                plt.show()
-                logger.info('gating...')
-                write_gate_config(cfg_path, df, ellipse1, ellipse2, circle)
-                dfg = gate(df, den)
-                rorder = sorted(dfg["cluster"].unique())
-
-                g = sns.FacetGrid(df, row="cluster", row_order=rorder, height=1.5, aspect=5)
-                g = g.map(sns.distplot, "c1_d_nuc_centr", rug=True)
-                g.axes[-1][0].set_xlim([-1, 20])
-                g.savefig('{:s}/centr-distribution-nucleus-center.pdf'.format(out_path))
-
-                g = sns.FacetGrid(df, row="cluster", row_order=rorder, height=1.5, aspect=5)
-                g = g.map(sns.distplot, "c1_d_nuc_bound", rug=True)
-                g.axes[-1][0].set_xlim([-1, 20])
-                g.savefig('{:s}/centr-distribution-nucleus-boundary.pdf'.format(out_path))
-
-                g = sns.FacetGrid(df, row="cluster", row_order=rorder, height=1.5, aspect=5)
-                g = g.map(sns.distplot, "c1_d_cell_bound", rug=True)
-                g.axes[-1][0].set_xlim([-1, 30])
-                g.savefig('{:s}/centr-distribution-cell-boundary.pdf'.format(out_path))
-
-                g = sns.FacetGrid(df, row="cluster", row_order=rorder, height=1.5, aspect=5)
-                g = g.map(sns.distplot, "nuc_centr_d_cell_centr", rug=True)
-                g.axes[-1][0].set_xlim([-1, 20])
-                g.savefig('{:s}/centr-distribution-nuc-cell.pdf'.format(out_path))
-
-                g = sns.FacetGrid(df, row="cluster", row_order=rorder, height=1.5, aspect=5)
-                g = g.map(sns.distplot, "c1_d_c2", rug=True)
-                g.axes[-1][0].set_xlim([-1, 10])
-                g.savefig('{:s}/centr-distribution-inter-centr.pdf'.format(out_path))
-
-                # rorder = sorted(dfg["cluster"].unique())
-                # dfg = dfg.melt(id_vars=["row", "col", "cluster"])
-                # corder = ["c1_d_nuc_centr", "c1_d_nuc_bound", "c1_d_cell_bound", "nuc_centr_d_cell_centr"]
-                # dfg = dfg[dfg["variable"].isin(corder)]
-                #
-                # out_path = os.path.join(args.folder, 'out', dir)
-                # g = sns.FacetGrid(dfg, row="cluster", row_order=rorder, col="variable", height=1.5, aspect=3)
-                # g = g.map_dataframe(_distplot, "value", rug=True)
-                # g.savefig('{:s}/distribution-across-cc.pdf'.format(out_path))
+            pd_path = os.path.join(root, 'nuclei.pandas')
+            if os.path.exists(pd_path):
+                apply_gate_to_folder(pd_path=pd_path, out_path=root)
+            else:
+                for dir in directories:
+                    if dir == 'render': continue
+                    pd_path = os.path.join(args.folder, 'out', dir, 'nuclei.pandas')
+                    out_path = os.path.join(args.folder, 'out', dir)
+                    if not os.path.exists(pd_path):
+                        logger.warning('%s not found!' % pd_path)
+                        continue
+                    apply_gate_to_folder(pd_path=pd_path, out_path=out_path)
