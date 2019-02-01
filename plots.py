@@ -6,15 +6,17 @@ import numpy as np
 from gui import SUSSEX_CORAL_RED, SUSSEX_NAVY_BLUE
 
 
-def facs(df, ax=None, xlim=[1, 8], ylim=[12, 18.5]):
+def facs(df, ax=None, xlim=[1, 8], ylim=[12, 18.5], color=None):
     if ax is None:
         ax = plt.gca()
     df["geometry"] = df.apply(lambda row: shapely.geometry.Point(row['dna_int'] / 1e6 / 6, np.log(row['edu_int'])),
                               axis=1)
 
-    df.loc[:, 'phospho_rb_int'] = df['phospho_rb_int'].transform(lambda x: (x - x.mean()) / x.std())
-
-    ax.scatter(df['dna_int'] / 1e6 / 6, np.log(df['edu_int']), c=df['phospho_rb_int'], alpha=0.1)
+    if color is not None and color in df:
+        df.loc[:, color] = df[color].transform(lambda x: (x - x.mean()) / x.std())
+        ax.scatter(df['dna_int'] / 1e6 / 6, np.log(df['edu_int']), c=df[color], alpha=1)
+    else:
+        ax.scatter(df['dna_int'] / 1e6 / 6, np.log(df['edu_int']), alpha=0.5)
 
     ax.set_xlabel('dna [AU]')
     ax.set_ylabel('edu [AU]')

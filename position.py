@@ -8,15 +8,18 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 import shapely.geometry
+import shapely.wkt
 from matplotlib.patches import Ellipse
 
 import measurements as m
 from gui.draggable import DraggableEightNote
 import operetta as o
+import plots as p
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger('hhlab')
 logging.getLogger('matplotlib').setLevel(logging.ERROR)
+pd.set_option('display.width', 320)
 
 
 def move_images(df, render_path, destination_folder):
@@ -31,12 +34,6 @@ def move_images(df, render_path, destination_folder):
             logger.warning('no render for %s' % name)
 
 
-def on_key(event):
-    print('press', event.key)
-    if event.key == 'g':
-        gate()
-
-
 def read_gate_config(fname):
     if os.path.isfile(fname):
         with open(fname, 'r') as configfile:
@@ -45,7 +42,7 @@ def read_gate_config(fname):
 
             # logging.debug('sections found in file ' + str(config.sections()))
 
-            section = 'Pands'
+            section = 'Pandas'
             if config.has_section(section):
                 rows = ast.literal_eval(config.get(section, 'rows'))
                 cols = ast.literal_eval(config.get(section, 'cols'))
@@ -144,36 +141,30 @@ def apply_gate_to_folder(pd_path, out_path):
     # print(df.groupby(['fid', 'row', 'col', 'id']).size())
     # print(len(df.groupby(['fid', 'row', 'col', 'id']).size()))
 
-    df["geometry"] = df.apply(
-        lambda row: shapely.geometry.Point(row['dna_int'] / 1e6 / 6, np.log(row['edu_int'])),
-        axis=1)
-
     fig = plt.figure()
     ax = fig.gca()
     ax.set_aspect('equal')
-
-    cidkeyboard = ax.figure.canvas.mpl_connect('key_press_event', on_key)
 
     cfg_path = os.path.join(out_path, 'gate.cfg')
     ellipse1, ellipse2, circle, rows, cols = read_gate_config(cfg_path)
     if not (len(rows) == 0 or len(cols) == 0):
         df = df[(df["row"].isin(rows)) & (df["col"].isin(cols))]
-    map = ax.scatter(df['dna_int'] / 1e6 / 6, np.log(df['edu_int']), c=df['c1_d_nuc_bound'], alpha=1)
+    p.facs(df, ax=ax)
 
     den = DraggableEightNote(ax, ellipse1, ellipse2, circle, number_of_sphase_segments=4)
-    ax.set_title(dir)
     fig.subplots_adjust(top=0.99, bottom=0.3)
-
     plt.show()
+
     logger.info('gating...')
     # Save just the portion _inside_ the second axis's boundaries
     extent = ax.get_window_extent().transformed(fig.dpi_scale_trans.inverted())
     fig.savefig('{:s}/gate.png'.format(out_path), bbox_inches=extent)
 
-
     write_gate_config(cfg_path, df, ellipse1, ellipse2, circle)
-    dfg = gate(df, den)
-    rorder = sorted(dfg["cluster"].unique())
+    df["area_nucleus"] = df.apply(lambda row: shapely.wkt.loads(row['nucleus']).area, axis=1)
+    df = gate(df, den)
+    print(df[["area_nucleus", "cluster"]])
+    rorder = sorted(df["cluster"].unique())
 
     g = sns.FacetGrid(df, row="cluster", row_order=rorder, height=1.5, aspect=5)
     g = g.map(sns.distplot, "c1_d_nuc_centr", rug=True)
@@ -199,6 +190,10 @@ def apply_gate_to_folder(pd_path, out_path):
     g = g.map(sns.distplot, "c1_d_c2", rug=True)
     g.axes[-1][0].set_xlim([-1, 10])
     g.savefig('{:s}/centr-distribution-inter-centr.pdf'.format(out_path))
+
+    g = sns.FacetGrid(df, row="cluster", row_order=rorder, height=1.5, aspect=5)
+    g = g.map(sns.distplot, "area_nucleus", rug=True)
+    g.savefig('{:s}/nucleus-distribution-area.pdf'.format(out_path))
 
     # rorder = sorted(dfg["cluster"].unique())
     # dfg = dfg.melt(id_vars=["row", "col", "cluster"])
@@ -228,27 +223,52 @@ if __name__ == '__main__':
     if args.sort:
         ax = plt.gca()
         for root, directories, filenames in os.walk(os.path.join(args.folder, 'out')):
-            for dir in directories:
-                if dir == 'render': continue
-                pd_path = os.path.join(args.folder, 'out', dir, 'nuclei.pandas')
-                df = pd.read_pickle(pd_path)
-                render_path = o.ensure_dir(os.path.join(args.folder, 'render'))
+            cfg_path = os.path.join(root, 'gate.cfg')
+            if os.path.exists(cfg_path):
+                ellipse1, ellipse2, circle, rows, cols = read_gate_config(cfg_path)
 
+                pd_path = os.path.join(root, 'nuclei.pandas')
+                df = pd.read_pickle(pd_path)
                 df["geometry"] = df.apply(
                     lambda row: shapely.geometry.Point(row['dna_int'] / 1e6 / 6, np.log(row['edu_int'])),
                     axis=1)
 
-                cfg_path = os.path.join(args.folder, 'out', dir, 'gate.cfg')
-                ellipse1, ellipse2, circle, rows, cols = read_gate_config(cfg_path)
                 den = DraggableEightNote(ax, ellipse1, ellipse2, circle, number_of_sphase_segments=4)
                 write_gate_config(cfg_path, df, ellipse1, ellipse2, circle)
                 df = gate(df, den)
 
+                render_path = o.ensure_dir(os.path.join(root, 'render'))
                 for ix, dfg in df.groupby("cluster"):
-                    _path = os.path.join(args.folder, 'out', dir, 'render', str(int(ix)))
+                    _path = os.path.join(root, 'render', str(int(ix)))
                     dest_path = o.ensure_dir(_path)
 
                     move_images(dfg, render_path=render_path, destination_folder=dest_path)
+            else:
+
+                for dir in directories:
+                    if dir == 'render': continue
+                    cfg_path = os.path.join(args.folder, 'out', dir, 'gate.cfg')
+                    if not os.path.exists(cfg_path):
+                        logger.warning('%s not found!' % cfg_path)
+                        continue
+                    ellipse1, ellipse2, circle, rows, cols = read_gate_config(cfg_path)
+
+                    pd_path = os.path.join(args.folder, 'out', dir, 'nuclei.pandas')
+                    df = pd.read_pickle(pd_path)
+                    df["geometry"] = df.apply(
+                        lambda row: shapely.geometry.Point(row['dna_int'] / 1e6 / 6, np.log(row['edu_int'])),
+                        axis=1)
+
+                    den = DraggableEightNote(ax, ellipse1, ellipse2, circle, number_of_sphase_segments=4)
+                    write_gate_config(cfg_path, df, ellipse1, ellipse2, circle)
+                    df = gate(df, den)
+
+                    render_path = o.ensure_dir(os.path.join(args.folder, 'render'))
+                    for ix, dfg in df.groupby("cluster"):
+                        _path = os.path.join(args.folder, 'out', dir, 'render', str(int(ix)))
+                        dest_path = o.ensure_dir(_path)
+
+                        move_images(dfg, render_path=render_path, destination_folder=dest_path)
 
     if args.gate:
         for root, directories, filenames in os.walk(os.path.join(args.folder, 'out')):
