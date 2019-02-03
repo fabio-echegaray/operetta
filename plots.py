@@ -50,7 +50,7 @@ def render_cell(nucleus, cell, centrosomes, ax=None):
                            linewidth=2, zorder=5)
             ax.add_artist(c)
             ax.plot([c1.x, cen.x], [c1.y, cen.y], color='gray', linewidth=1, zorder=2)
-            ax.text(c1.x, c1.y, '%0.2f' % (c1.distance(cen)), color='w', zorder=10)
+            # ax.text(c1.x, c1.y, '%0.2f' % (c1.distance(cen)), color='w', zorder=10)
         if c2 is not None:
             c = plt.Circle((c2.x, c2.y), radius=2, facecolor='none', edgecolor=SUSSEX_NAVY_BLUE,
                            linewidth=2, zorder=5)

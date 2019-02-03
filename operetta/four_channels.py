@@ -61,13 +61,13 @@ class FourChannels(Montage):
         hoechst_raw, tubulin_raw, pericentrin_raw, edu_raw = self.max_projection(row, col, fid)
 
         hoechst_gray = exposure.equalize_hist(hoechst_raw)
-        tubulin_gray = exposure.equalize_hist(tubulin_raw)
-        # pericentrin_gray = exposure.equalize_hist(pericentrin_gray)
+        # tubulin_gray = exposure.equalize_hist(tubulin_raw)
+        pericentrin_gray = exposure.equalize_hist(pericentrin_raw)
         # edu_gray = exposure.equalize_hist(edu_gray)
 
         hoechst = color.gray2rgb(hoechst_gray)
-        tubulin = color.gray2rgb(tubulin_gray)
-        # pericentrin = color.gray2rgb(pericentrin_gray)
+        # tubulin = color.gray2rgb(tubulin_gray)
+        pericentrin = color.gray2rgb(pericentrin_gray)
         # edu = color.gray2rgb(edu_gray)
 
         alexa_488 = [.29, 1., 0]
@@ -79,14 +79,16 @@ class FourChannels(Montage):
         #       pericentrin * alexa_594 * 0.25 + \
         #       edu * alexa_647 * 0.25
 
-        out = hoechst * hoechst_33342 * 0.4 + tubulin * alexa_488 * 0.4
+        # out = hoechst * hoechst_33342 * 0.4 + tubulin * alexa_488 * 0.4
+        out = hoechst * hoechst_33342 * 0.5 + pericentrin * alexa_594 * 0.5
+        # out = pericentrin * alexa_594
 
         fig_general = Figure((max_width * 4 / 150, max_width * 4 / 150), dpi=150)
         canvas_g = FigureCanvas(fig_general)
         axg = fig_general.gca()
         fig_closeup = Figure((max_width / 150, max_width / 150), dpi=150)
         canvas_c = FigureCanvas(fig_closeup)
-        axc = fig_general.gca()
+        axc = fig_closeup.gca()
 
         if path is None:
             basepath = os.path.dirname(self.dir)
@@ -106,14 +108,22 @@ class FourChannels(Montage):
             p.render_cell(nucleus, cell, [c1, c2], ax=axg)
 
             # render and save closeup image
-            minx, miny, maxx, maxy = cell.bounds
-            w, h = tubulin_gray.shape
             axc.cla()
+            p.render_cell(nucleus, cell, [c1, c2], ax=axc)
+            w, h = hoechst_raw.shape
             axc.imshow(out, extent=[0, w / self.pix_per_um, h / self.pix_per_um, 0])
-            p.render_cell(nucleus, cell, [c1, c2], ax=axg)
-            # ax.text(nucleus.centroid.x * self.pix_per_um, nucleus.centroid.y * self.pix_per_um, ix, color='w')
-            axg.set_xlim([minx - 20, maxx + 20])
-            axg.set_ylim([miny - 20, maxy + 20])
+            minx, miny, maxx, maxy = cell.bounds
+            w, h = maxx - minx, maxy - miny
+            axc.set_xlim(cell.centroid.x - w / 2, cell.centroid.x + w / 2)
+            axc.set_ylim(cell.centroid.y - h / 2, cell.centroid.y + h / 2)
+            x0, xf = cell.centroid.x - w / 2, cell.centroid.x + w / 2
+            y0, yf = cell.centroid.y - h / 2, cell.centroid.y + h / 2
+            axc.set_xlim(x0, xf)
+            axc.set_ylim(y0, yf)
+            axc.plot([x0, x0 + 10], [y0 + 0.5, y0 + 0.5], c='w', lw=4)
+            axc.text(x0 + 1, y0 + 0.6 * self.pix_per_um, '10 um', color='w')
+            if "cluster" in smp:
+                axc.text(nucleus.centroid.x, nucleus.centroid.y, smp["cluster"], color='w', zorder=10)
 
             pil = canvas_to_pil(canvas_c)
             name = 'r%d-c%d-f%d-i%d.jpg' % (row, col, fid, ix)
@@ -123,7 +133,7 @@ class FourChannels(Montage):
         axg.plot([5, 5 + 10], [5, 5], c='w', lw=4)
         axg.text(5 + 1, 5 + 1.5, '10 um', color='w')
 
-        w, h = tubulin_gray.shape
+        w, h = hoechst_raw.shape
         axg.imshow(out, extent=[0, w / self.pix_per_um, h / self.pix_per_um, 0])
         axg.set_xlim([0, w / self.pix_per_um])
         axg.set_ylim([0, h / self.pix_per_um])

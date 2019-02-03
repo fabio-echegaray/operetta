@@ -237,7 +237,7 @@ if __name__ == '__main__':
                 write_gate_config(cfg_path, df, ellipse1, ellipse2, circle)
                 df = gate(df, den)
 
-                render_path = o.ensure_dir(os.path.join(root, 'render'))
+                render_path = o.ensure_dir(os.path.join(args.folder, 'render'))
                 for ix, dfg in df.groupby("cluster"):
                     _path = os.path.join(root, 'render', str(int(ix)))
                     dest_path = o.ensure_dir(_path)
