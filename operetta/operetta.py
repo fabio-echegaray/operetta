@@ -63,6 +63,7 @@ class Montage:
         self.um_per_pix = convert_to(1.8983367649421008E-07 * meter / pix, um / pix).n()
         self.pix_per_um = 1 / self.um_per_pix
         self.pix_per_um = float(self.pix_per_um.args[0])
+        self.um_per_pix = float(self.um_per_pix.args[0])
 
         if not os.path.exists(self.images_path):
             raise ImagesFolderNotFound('Images folder is not in the structure.')
