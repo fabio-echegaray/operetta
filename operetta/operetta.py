@@ -23,14 +23,15 @@ class Montage:
         l = list()
         self.base_path = folder
         self.images_path = os.path.join(folder, 'Images')
-        if not os.path.exists(self.images_path):
-            raise ImagesFolderNotFound('Images folder is not in the structure.')
 
         self.name = condition_name
 
         csv_path = os.path.join(folder, 'out', 'operetta.csv')
         if not os.path.exists(csv_path):
             logger.info("generating image file structure into a csv file...")
+            if not os.path.exists(self.images_path):
+                raise FileNotFoundError('Images folder is needed in this step.')
+
             #  build a list of dicts for every image file in the directory
             for root, directories, filenames in os.walk(folder):
                 for filename in filenames:
@@ -62,6 +63,9 @@ class Montage:
         self.um_per_pix = convert_to(1.8983367649421008E-07 * meter / pix, um / pix).n()
         self.pix_per_um = 1 / self.um_per_pix
         self.pix_per_um = float(self.pix_per_um.args[0])
+
+        if not os.path.exists(self.images_path):
+            raise ImagesFolderNotFound('Images folder is not in the structure.')
 
     @staticmethod
     def filename(row):

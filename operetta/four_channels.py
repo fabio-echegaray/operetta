@@ -139,9 +139,6 @@ class FourChannels(Montage):
         pil.save(ensure_dir(fpath))
 
     def is_valid_sample(self, width, height, cell_polygon, nuclei_polygon, nuclei_list=None):
-        if self.samples is None:
-            raise NoSamplesError('pandas samples file is needed to use this function.')
-
         # check that neither nucleus or cell boundary touch the ends of the frame
         frame = Polygon([(0, 0), (0, width), (height, width), (height, 0)])
 
@@ -153,7 +150,7 @@ class FourChannels(Montage):
             logger.debug('sample rejected because it was touching the frame')
             return False
         if not cell_polygon.contains(nuclei_polygon):
-            logger.debug("sample rejected because it didn't contain a nucleus")
+            # logger.debug("sample rejected because it didn't contain a nucleus")
             return False
 
         # make sure that there's only one nucleus inside cell
@@ -181,8 +178,10 @@ class FourChannels(Montage):
     def measure(self, *args):
         if len(args) == 1 and isinstance(args[0], int):
             id = args[0]
-            r = self.files.ix[id]
+            r = self.files_gr.ix[id - 1]
             row, col, fid = r['row'], r['col'], r['fid']
+            logger.debug('measuring id=%d row=%d col=%d fid=%d' % (id, row, col, fid))
+
         elif len(args) == 3 and np.all([np.issubdtype(a, np.integer) for a in args]):
             row, col, fid = args[0], args[1], args[2]
         else:
