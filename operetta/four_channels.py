@@ -29,13 +29,22 @@ class FourChannels(Montage):
         pd_path = os.path.join(base_path, 'out', 'nuclei.pandas')
         if os.path.exists(pd_path):
             self.samples = pd.read_pickle(pd_path)
-
-            if np.any([i not in self.samples for i in ['row', 'col', 'fid']]):
-                is_row, is_col, is_fid = [i in self.samples for i in ['row', 'col', 'fid']]
-                raise NoSamplesError('key columns not in dataframe row=%s col=%s fid=%s' % (is_row, is_col, is_fid))
+            if self.samples_are_well_formed(raise_exception=True): pass
         else:
             logger.warning('no pandas file found.')
             self.samples = None
+
+    def samples_are_well_formed(self, raise_exception=False):
+        if np.any([i not in self.samples for i in ['row', 'col', 'fid']]):
+            is_row, is_col, is_fid = [i in self.samples for i in ['row', 'col', 'fid']]
+            _txt = 'key columns not in dataframe row=%s col=%s fid=%s' % (is_row, is_col, is_fid)
+            if raise_exception:
+                raise NoSamplesError(_txt)
+            else:
+                logger.warning(_txt)
+
+            return False
+        return True
 
     @staticmethod
     def filename_of_render(row, basepath):
@@ -51,6 +60,8 @@ class FourChannels(Montage):
     def save_render(self, *args, **kwargs):
         if len(args) == 1 and isinstance(args[0], int):
             id = args[0]
+            if not self.samples_are_well_formed():
+                return
             r = self.files_gr.ix[id - 1]
             row, col, fid = r['row'], r['col'], r['fid']
             logger.debug('rendering id=%d row=%d col=%d fid=%d' % (id, row, col, fid))
@@ -61,8 +72,8 @@ class FourChannels(Montage):
             logger.warning("there's nothing to render")
             return
 
-        path=kwargs['path'] if 'path' in kwargs else None
-        max_width=kwargs['max_width'] if 'max_width' in kwargs else None
+        path = kwargs['path'] if 'path' in kwargs else None
+        max_width = kwargs['max_width'] if 'max_width' in kwargs else None
         self._save_render_row_col_fid(row, col, fid, path=path, max_width=max_width)
 
     def _save_render_row_col_fid(self, row, col, fid, path=None, max_width=50):
@@ -180,6 +191,9 @@ class FourChannels(Montage):
             if n_nuc != 1:
                 return False
 
+        # nucleus area should be at least three to four times the are of the cell
+        # TODO: do it
+
         return True
 
     @staticmethod
@@ -271,6 +285,7 @@ class FourChannels(Montage):
 
                 # logger.debug('centrosomes {:s}'.format(str(cntrsmes)))
                 logger.debug('found {:d} centrosomes'.format(len(cntrsmes)))
+                if len(cntrsmes) == 0: continue
 
                 twocntr = len(cntrsmes) >= 2
                 c1 = cntrsmes[0] if len(cntrsmes) > 0 else None
