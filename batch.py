@@ -1,12 +1,8 @@
 import logging
 import os
+import traceback
 
-from shapely.geometry.polygon import Polygon
 import matplotlib.pyplot as plt
-from matplotlib.ticker import EngFormatter
-import shapely.geometry
-import shapely.wkt
-import shapely.wkt
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger('hhlab')
@@ -17,28 +13,30 @@ def batch_process_operetta_folder(path, row=None, col=None, name=None):
     operetta = o.Montage(path, row=row, col=col, name=name)
     outdf = pd.DataFrame()
     for row, col, fid in operetta.stack_generator():
-        hoechst, tubulin, pericentrin, edu = operetta.max_projection(row, col, fid)
-        r = 30  # [um]
-        pix_per_um = operetta.pix_per_um
+        try:
+            hoechst, tubulin, pericentrin, edu = operetta.max_projection(row, col, fid)
+            r = 10  # [um]
+            pix_per_um = operetta.pix_per_um
 
-        imgseg = m.nuclei_segmentation(hoechst, radius=r * pix_per_um)
-        n_nuclei = len(np.unique(imgseg))
-        operetta.add_mesurement(row, col, fid, 'nuclei found', n_nuclei)
+            imgseg, nuclei = m.nuclei_segmentation(hoechst, radius=r * pix_per_um)
+            n_nuclei = len(np.unique(imgseg))
+            if n_nuclei > 1:
+                operetta.add_mesurement(row, col, fid, 'nuclei found', n_nuclei)
 
-        if n_nuclei > 1:
-            # self.nuclei_features = m.nuclei_features(imgseg, area_thresh=(r * self.resolution) ** 2 * np.pi)
-            nuclei = m.nuclei_features(imgseg)
-            for i, n in enumerate(nuclei):
-                n['id'] = i
+                for i, n in enumerate(nuclei):
+                    n['id'] = i
 
-            cells, _ = m.cell_boundary(tubulin, hoechst)
+                cells, _ = m.cell_boundary(tubulin, hoechst)
 
-            samples, df = m.measure_into_dataframe(hoechst, pericentrin, edu, tubulin, nuclei, cells, pix_per_um)
-            if len(df) > 0:
-                df['fid'] = fid
-                df['row'] = row
-                df['col'] = col
-                outdf = outdf.append(df, ignore_index=True, sort=False)
+                samples, df = m.measure_into_dataframe(hoechst, pericentrin, edu, tubulin, nuclei, cells, pix_per_um)
+                if len(df) > 0:
+                    df['fid'] = fid
+                    df['row'] = row
+                    df['col'] = col
+                    outdf = outdf.append(df, ignore_index=True, sort=False)
+        except o.NoSamplesError as e:
+            logger.error(e)
+            traceback.print_stack()
 
     pd.to_pickle(outdf, operetta.save_path(file='nuclei.pandas'))
     operetta.files.to_csv(operetta.save_path(file='operetta.csv'))
@@ -73,6 +71,7 @@ if __name__ == '__main__':
     import pandas as pd
 
     import measurements as m
+    import plots as p
     import operetta as o
 
     """
@@ -82,13 +81,27 @@ if __name__ == '__main__':
         source ~/py36/bin/activate
     """
     if args.measure:
+        logger.debug('------------------------- MEASURING -------------------------')
+        logger.debug(args.folder)
+        logger.debug(args.column)
+        logger.debug(args.name)
         df = batch_process_operetta_folder(args.folder, col=args.column, name=args.name)
 
     if args.render:
         for root, directories, filenames in os.walk(os.path.join(args.folder, 'out')):
-            for dir in directories:
-                pd_path = os.path.join(args.folder, 'out', dir, 'nuclei.pandas')
-                batch_render(pd_path, args.folder)
+            pd_path = os.path.join(root, 'nuclei.pandas')
+            if os.path.exists(pd_path):
+                try:
+                    batch_render(pd_path, args.folder)
+                except o.NoSamplesError as e:
+                    logger.error(e)
+            else:
+                for dir in directories:
+                    pd_path = os.path.join(args.folder, 'out', dir, 'nuclei.pandas')
+                    try:
+                        batch_render(pd_path, args.folder)
+                    except o.NoSamplesError as e:
+                        logger.error(e)
 
     if args.plot:
         pd_path = os.path.join(args.folder, 'out/nuclei.pandas')
@@ -97,25 +110,7 @@ if __name__ == '__main__':
         df.to_csv(pd_path)
         print(df)
 
-        df["geometry"] = df.apply(lambda row: shapely.geometry.Point(row['dna_int'] / 1e6 / 6, np.log(row['edu_int'])),
-                                  axis=1)
-        df["cluster"] = -1
-
         fig = plt.figure(figsize=(8, 8))
-        ax = fig.gca()
-        ax.set_xlabel('dna [AU]')
-        ax.set_ylabel('edu [AU]')
-        formatter = EngFormatter(unit='')
-        ax.xaxis.set_major_formatter(formatter)
-        ax.yaxis.set_major_formatter(formatter)
-        ax.set_xlim([1, 8])
-        ax.set_ylim([12, 18.5])
-        ax.set_aspect('equal')
-
-        df.loc[:, 'phospho_rb_int'] = df['phospho_rb_int'].transform(
-            lambda x: (x - x.mean()) / x.std())
-
-        map = ax.scatter(df['dna_int'] / 1e6 / 6, np.log(df['edu_int']), c=df['phospho_rb_int'], alpha=0.1)
-
+        p.facs(df, ax=fig.gca())
         path = o.ensure_dir(os.path.join(args.folder, 'out/graphs/facs.pdf'))
         fig.savefig(path)

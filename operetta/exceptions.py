@@ -1,0 +1,2 @@
+class NoSamplesError(Exception):
+    pass

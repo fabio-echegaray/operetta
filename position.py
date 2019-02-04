@@ -1,266 +1,286 @@
 import logging
 import os
+import configparser
+import ast
 
-from sympy import lambdify
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from matplotlib.ticker import EngFormatter
 import shapely.geometry
-from descartes import PolygonPatch
-from sympy import symbols
-from sympy.physics.mechanics import ReferenceFrame
+import shapely.wkt
+from matplotlib.patches import Ellipse
 
+import measurements as m
+from gui.draggable import DraggableEightNote
 import operetta as o
+import plots as p
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger('hhlab')
+logging.getLogger('matplotlib').setLevel(logging.ERROR)
+pd.set_option('display.width', 320)
 
 
-def s_phase_function(t, ref):
-    from sympy.codegen.cfunctions import log10
-
-    f = t * ref.x + (log10(t - 2.2) + 17) * ref.y
-    Tn = f.diff(t, ref).normalize().simplify()
-    Nn = Tn.diff(t, ref).normalize().simplify()
-    sq = f.to_matrix(ref).applyfunc(lambda x: x ** 2)
-    # length = sympy.sqrt(sq.row(0)+sq.row(1))
-    # return lambdify(t, f.to_matrix(N)[1]), lambdify(t, Tn.to_matrix(N)), lambdify(t, Nn.to_matrix(N))
-    return lambdify(t, f.to_matrix(ref)[1]), Tn, Nn
-
-
-def move_images(df, path, folder):
-    render_path = o.ensure_dir(os.path.join(path, 'render'))
-    destination_folder = os.path.join(render_path, folder)
+def move_images(df, render_path, destination_folder):
     os.makedirs(destination_folder, exist_ok=True)
     for i, r in df.iterrows():
-        name, original_path = o.Dataframe.render_filename(r, path)
+        name, original_path = o.FourChannels.render_filename(r, render_path)
         destination_path = os.path.join(destination_folder, name)
         try:
-            logger.warning('moving %s to %s' % (name, folder))
+            logger.info('moving %s to %s' % (name, destination_folder))
             os.rename(original_path, destination_path)
         except Exception:
-            logger.warning('no render for %s' % destination_path)
+            logger.warning('no render for %s' % name)
 
 
-def render_images(df, path, folder):
-    render_path = o.ensure_dir(os.path.join(path, 'render'))
-    destination_folder = os.path.join(render_path, folder)
-    os.makedirs(destination_folder, exist_ok=True)
-    for i, r in df.iterrows():
-        name, original_path = o.Dataframe.render_filename(r, path)
-        # operetta.save_render(row, col, fid, max_width=300)
-        destination_path = os.path.join(destination_folder, name)
-        try:
-            logger.warning('moving %s to %s' % (name, folder))
-            os.rename(original_path, destination_path)
-        except Exception:
-            logger.warning('no render for %s' % destination_path)
+def read_gate_config(fname):
+    if os.path.isfile(fname):
+        with open(fname, 'r') as configfile:
+            config = configparser.ConfigParser()
+            config.read_file(configfile)
+
+            # logging.debug('sections found in file ' + str(config.sections()))
+
+            section = 'Pandas'
+            if config.has_section(section):
+                rows = ast.literal_eval(config.get(section, 'rows'))
+                cols = ast.literal_eval(config.get(section, 'cols'))
+            else:
+                rows = []
+                cols = []
+            section = 'Gating geometries'
+            if config.has_section(section):
+                xe1 = config.getfloat(section, 'G1_ellipse_x')
+                ye1 = config.getfloat(section, 'G1_ellipse_y')
+                we1 = config.getfloat(section, 'G1_ellipse_width')
+                he1 = config.getfloat(section, 'G1_ellipse_height')
+                ae1 = config.getfloat(section, 'G1_ellipse_angle')
+
+                xe2 = config.getfloat(section, 'G2_ellipse_x')
+                ye2 = config.getfloat(section, 'G2_ellipse_y')
+                we2 = config.getfloat(section, 'G2_ellipse_width')
+                he2 = config.getfloat(section, 'G2_ellipse_height')
+                ae2 = config.getfloat(section, 'G2_ellipse_angle')
+
+                xc = config.getfloat(section, 'height_circle_x')
+                yc = config.getfloat(section, 'height_circle_y')
+
+                ellipse1 = Ellipse(xy=(xe1, ye1), width=we1, height=he1, angle=ae1, fc='g', picker=5)
+                ellipse2 = Ellipse(xy=(xe2, ye2), width=we2, height=he2, angle=ae2, fc='g', picker=5)
+                circle = plt.Circle(xy=(xc, yc), radius=0.1, fc='r', picker=5)
+    else:
+        ellipse1 = Ellipse(xy=(2.0, 14.4), width=1, height=0.5, angle=25, fc='g', picker=5)
+        ellipse2 = Ellipse(xy=(3.8, 14.9), width=1, height=0.5, angle=25, fc='g', picker=5)
+        circle = plt.Circle(xy=(2.5, 16), radius=0.1, fc='r', picker=5)
+        rows = []
+        cols = []
+
+    return ellipse1, ellipse2, circle, rows, cols
 
 
-def u2os_polygons():
-    # G1 ellipse
-    circ = shapely.geometry.Point((2.0, 14.4)).buffer(0.8)
-    ell = shapely.affinity.scale(circ, 1, 0.6)
-    ellr = shapely.affinity.rotate(ell, 25)
-    yield ellr
+def write_gate_config(fname, df, ellipse1, ellipse2, circle):
+    with open(fname, 'w') as configfile:
+        config = configparser.RawConfigParser()
+        config.add_section('General')
+        config.set('General', 'Version', 'v0.1')
 
-    # S phase rect 1
-    poly = shapely.geometry.Polygon([(1.3, 14.7), (2.7, 15.0), (3.0, 15.9), (1.5, 16.3)])
-    yield poly
+        section = 'Pandas'
+        config.add_section(section)
+        config.set(section, 'rows', sorted(df["row"].unique()))
+        config.set(section, 'cols', sorted(df["col"].unique()))
 
-    # S phase rect 2
-    poly = shapely.geometry.Polygon([(3.18, 15.2), (4.6, 15.6), (4.6, 16.6), (3.0, 16.1)])
-    yield poly
+        section = 'Gating geometries'
+        config.add_section(section)
+        xe1, ye1 = ellipse1.center
+        we1, he1, ae1 = ellipse1.width, ellipse1.height, ellipse1.angle
+        xe2, ye2 = ellipse2.center
+        we2, he2, ae2 = ellipse2.width, ellipse2.height, ellipse2.angle
+        xc, yc = circle.center
 
-    # G2 ellipse
-    circ = shapely.geometry.Point((3.8, 14.9)).buffer(1)
-    ell = shapely.affinity.scale(circ, 1.1, 0.5)
-    ellr = shapely.affinity.rotate(ell, 15)
-    yield ellr
+        config.set(section, 'G1_ellipse_x', xe1)
+        config.set(section, 'G1_ellipse_y', ye1)
+        config.set(section, 'G1_ellipse_width', we1)
+        config.set(section, 'G1_ellipse_height', he1)
+        config.set(section, 'G1_ellipse_angle', ae1)
 
-    x = np.linspace(0.1, 4.5, num=100)
-    t = symbols('t', positive=True)
-    N = ReferenceFrame('N')
-    f, tn, nn = s_phase_function(t, N)
+        config.set(section, 'G2_ellipse_x', xe2)
+        config.set(section, 'G2_ellipse_y', ye2)
+        config.set(section, 'G2_ellipse_width', we2)
+        config.set(section, 'G2_ellipse_height', he2)
+        config.set(section, 'G2_ellipse_angle', ae2)
 
-    h = 0.8
-    interior = lambdify(t, (nn * h).to_matrix(N))
-    exterior = lambdify(t, (nn * -h).to_matrix(N))
+        config.set(section, 'height_circle_x', xc)
+        config.set(section, 'height_circle_y', yc)
 
-    xti = None
-    for k, xt in enumerate(np.arange(2.3, 4.5, step=0.7)):
-        x_ii = np.where(x <= xt)[0].max() + 1
-        xx = x[x_ii]
-
-        xi, yi, _ = interior(xx) + np.array([[xx], [f(xx)], [0]])
-        xf, yf, _ = exterior(xx) + np.array([[xx], [f(xx)], [0]])
-
-        if xti is not None:
-            x_ix = np.where((xti <= x) & (x <= xt))[0]
-            xx = x[np.append(x_ix, x_ix.max() + 1)]
-            [xi], [yi], _ = interior(xx) + np.array([[xx], [f(xx)], [0]])
-            [xf], [yf], _ = exterior(xx) + np.array([[xx], [f(xx)], [0]])
-            pointList = list()
-            pointList.extend([shapely.geometry.Point(x, y) for x, y in zip(xi, yi)])
-            pointList.extend([shapely.geometry.Point(x, y) for x, y in zip(np.flip(xf), np.flip(yf))])
-
-            poly = shapely.geometry.Polygon([(p.x, p.y) for p in pointList])
-            yield poly
-
-        xti = xt
+        config.write(configfile)
 
 
-def rpe_polygons():
-    # G1 ellipse
-    circ = shapely.geometry.Point((2.2, 13.8)).buffer(0.9)
-    ell = shapely.affinity.scale(circ, 1, 0.6)
-    ellr = shapely.affinity.rotate(ell, 20)
-    yield ellr
+def _distplot(x, **kwargs):
+    ax = plt.gca()
+    data = kwargs.pop("data")
+    # sns.distplot(data[x], ax=ax, **kwargs)
+    data[x].plot.hist(ax=ax)
 
-    # S phase rect 1
-    poly = shapely.geometry.Polygon([(1.5, 14.4), (3.0, 14.4), (3.0, 15.4), (1.5, 15.4)])
-    yield poly
 
-    # S phase rect 2
-    poly = shapely.geometry.Polygon([(3.3, 16.1), (5.5, 16.6), (5.5, 15.1), (3.2, 14.8)])
-    yield poly
+def gate(df, den):
+    if df.empty:
+        logger.warning('empty dataset!')
+        return
 
-    # G2 ellipse
-    circ = shapely.geometry.Point((4.35, 14.4)).buffer(1)
-    ell = shapely.affinity.scale(circ, 1.4, 0.6)
-    ellr = shapely.affinity.rotate(ell, 15)
-    yield ellr
+    for i, poly in enumerate(den.polygons()):
+        ix = df['geometry'].apply(lambda g: g.within(poly))
+        df.loc[ix, 'cluster'] = i
+    df = df[~df["cluster"].isna()]
+    return df
 
-    x = np.linspace(0.1, 5.5, num=100)
-    t = symbols('t', positive=True)
-    N = ReferenceFrame('N')
-    f, tn, nn = s_phase_function(t, N)
 
-    h = 0.8
-    interior = lambdify(t, (nn * h).to_matrix(N))
-    exterior = lambdify(t, (nn * -h).to_matrix(N))
+def apply_gate_to_folder(pd_path, out_path):
+    df = pd.read_pickle(pd_path)
+    df = df[df.apply(m.is_valid_measured_row, axis=1)]
+    # print(df.groupby(['fid', 'row', 'col', 'id']).size())
+    # print(len(df.groupby(['fid', 'row', 'col', 'id']).size()))
 
-    xti = None
-    for k, xt in enumerate(np.arange(2.2, 5.5, step=0.7)):
-        x_ii = np.where(x <= xt)[0].max() + 1
-        xx = x[x_ii]
+    fig = plt.figure()
+    ax = fig.gca()
+    ax.set_aspect('equal')
 
-        xi, yi, _ = interior(xx) + np.array([[xx], [f(xx)], [0]])
-        xf, yf, _ = exterior(xx) + np.array([[xx], [f(xx)], [0]])
+    cfg_path = os.path.join(out_path, 'gate.cfg')
+    ellipse1, ellipse2, circle, rows, cols = read_gate_config(cfg_path)
+    if not (len(rows) == 0 or len(cols) == 0):
+        df = df[(df["row"].isin(rows)) & (df["col"].isin(cols))]
+    p.facs(df, ax=ax)
 
-        if xti is not None:
-            x_ix = np.where((xti <= x) & (x <= xt))[0]
-            xx = x[np.append(x_ix, x_ix.max() + 1)]
-            [xi], [yi], _ = interior(xx) + np.array([[xx], [f(xx)], [0]])
-            [xf], [yf], _ = exterior(xx) + np.array([[xx], [f(xx)], [0]])
-            pointList = list()
-            pointList.extend([shapely.geometry.Point(x, y) for x, y in zip(xi, yi)])
-            pointList.extend([shapely.geometry.Point(x, y) for x, y in zip(np.flip(xf), np.flip(yf))])
+    den = DraggableEightNote(ax, ellipse1, ellipse2, circle, number_of_sphase_segments=4)
+    fig.subplots_adjust(top=0.99, bottom=0.3)
+    plt.show()
 
-            poly = shapely.geometry.Polygon([(p.x, p.y) for p in pointList])
-            yield poly
+    logger.info('gating...')
+    # Save just the portion _inside_ the second axis's boundaries
+    extent = ax.get_window_extent().transformed(fig.dpi_scale_trans.inverted())
+    fig.savefig('{:s}/gate.png'.format(out_path), bbox_inches=extent)
 
-        xti = xt
+    write_gate_config(cfg_path, df, ellipse1, ellipse2, circle)
+    df["area_nucleus"] = df.apply(lambda row: shapely.wkt.loads(row['nucleus']).area, axis=1)
+    df = gate(df, den)
+    print(df[["area_nucleus", "cluster"]])
+    rorder = sorted(df["cluster"].unique())
+
+    g = sns.FacetGrid(df, row="cluster", row_order=rorder, height=1.5, aspect=5)
+    g = g.map(sns.distplot, "c1_d_nuc_centr", rug=True)
+    g.axes[-1][0].set_xlim([-1, 20])
+    g.savefig('{:s}/centr-distribution-nucleus-center.pdf'.format(out_path))
+
+    g = sns.FacetGrid(df, row="cluster", row_order=rorder, height=1.5, aspect=5)
+    g = g.map(sns.distplot, "c1_d_nuc_bound", rug=True)
+    g.axes[-1][0].set_xlim([-1, 20])
+    g.savefig('{:s}/centr-distribution-nucleus-boundary.pdf'.format(out_path))
+
+    g = sns.FacetGrid(df, row="cluster", row_order=rorder, height=1.5, aspect=5)
+    g = g.map(sns.distplot, "c1_d_cell_bound", rug=True)
+    g.axes[-1][0].set_xlim([-1, 30])
+    g.savefig('{:s}/centr-distribution-cell-boundary.pdf'.format(out_path))
+
+    g = sns.FacetGrid(df, row="cluster", row_order=rorder, height=1.5, aspect=5)
+    g = g.map(sns.distplot, "nuc_centr_d_cell_centr", rug=True)
+    g.axes[-1][0].set_xlim([-1, 20])
+    g.savefig('{:s}/centr-distribution-nuc-cell.pdf'.format(out_path))
+
+    g = sns.FacetGrid(df, row="cluster", row_order=rorder, height=1.5, aspect=5)
+    g = g.map(sns.distplot, "c1_d_c2", rug=True)
+    g.axes[-1][0].set_xlim([-1, 10])
+    g.savefig('{:s}/centr-distribution-inter-centr.pdf'.format(out_path))
+
+    g = sns.FacetGrid(df, row="cluster", row_order=rorder, height=1.5, aspect=5)
+    g = g.map(sns.distplot, "area_nucleus", rug=True)
+    g.savefig('{:s}/nucleus-distribution-area.pdf'.format(out_path))
+
+    # rorder = sorted(dfg["cluster"].unique())
+    # dfg = dfg.melt(id_vars=["row", "col", "cluster"])
+    # corder = ["c1_d_nuc_centr", "c1_d_nuc_bound", "c1_d_cell_bound", "nuc_centr_d_cell_centr"]
+    # dfg = dfg[dfg["variable"].isin(corder)]
+    #
+    # g = sns.FacetGrid(dfg, row="cluster", row_order=rorder, col="variable", height=1.5, aspect=3)
+    # g = g.map_dataframe(_distplot, "value", rug=True)
+    # g.savefig('{:s}/distribution-across-cc.pdf'.format(out_path))
 
 
 if __name__ == '__main__':
-    df = pd.read_pickle('out/nuclei.pandas')
-    df = df[df['tubulin_dens'] > 0.5e3]
-    df['c_ratio'] = df['c2_int'] / df['c1_int']
-    df = df[df['c_ratio'] > 0.6]
+    import argparse
 
-    print(df.groupby(['fid', 'row', 'col', 'id']).size())
-    print(len(df.groupby(['fid', 'row', 'col', 'id']).size()))
+    parser = argparse.ArgumentParser(description='Process analysis output.')
+    parser.add_argument('folder', metavar='F', type=str,
+                        help='folder where operetta images reside')
+    parser.add_argument('--gate', action='store_true',
+                        help='filters groups of data according to cell cycle progression')
+    parser.add_argument('--sort', action='store_true',
+                        help='sort rendered images according to gating')
+    args = parser.parse_args()
 
-    df["geometry"] = df.apply(lambda row: shapely.geometry.Point(row['dna_int'] / 1e6 / 6, np.log(row['edu_int'])),
-                              axis=1)
-    df["cluster"] = -1
+    if not os.path.exists(os.path.join(args.folder, 'out')):
+        raise Exception('Folder does not have any analysis in. Make sure you run batch.py first.')
 
-    fig = plt.figure(figsize=(8, 8))
-    ax = fig.gca()
-    ax.set_title('distance of the first centrosome with respect to nuleus centroid through cell cycle')
-    ax.set_xlabel('dna [AU]')
-    ax.set_ylabel('edu [AU]')
-    formatter = EngFormatter(unit='')
-    ax.xaxis.set_major_formatter(formatter)
-    ax.yaxis.set_major_formatter(formatter)
-    ax.set_xlim([1, 8])
-    ax.set_ylim([12, 18.5])
-    ax.set_aspect('equal')
-    # phony_log_formatter(ax)
+    if args.sort:
+        ax = plt.gca()
+        for root, directories, filenames in os.walk(os.path.join(args.folder, 'out')):
+            cfg_path = os.path.join(root, 'gate.cfg')
+            if os.path.exists(cfg_path):
+                ellipse1, ellipse2, circle, rows, cols = read_gate_config(cfg_path)
 
-    map = ax.scatter(df['dna_int'] / 1e6 / 6, np.log(df['edu_int']), c=df['c1_d_nuc_bound'], alpha=1)
-    # map = ax.scatter(df['dna_int'], df['edu_int'], c=df['c1_int'], alpha=1)
-    # cbar = fig.colorbar(map)
-    # cbar.set_label('distance [um]', rotation=270)
-    # sns.scatterplot(x="dna_int", y="edu_int", hue="c1_d_nuc_bound", size="c1_int",
-    #                 alpha=.5, palette="PRGn", data=df, ax=ax)
+                pd_path = os.path.join(root, 'nuclei.pandas')
+                df = pd.read_pickle(pd_path)
+                df["geometry"] = df.apply(
+                    lambda row: shapely.geometry.Point(row['dna_int'] / 1e6 / 6, np.log(row['edu_int'])),
+                    axis=1)
 
-    current_palette = sns.color_palette('bright', n_colors=10)
-    fig.savefig('facs.pdf')
+                den = DraggableEightNote(ax, ellipse1, ellipse2, circle, number_of_sphase_segments=4)
+                write_gate_config(cfg_path, df, ellipse1, ellipse2, circle)
+                df = gate(df, den)
 
-    print(df.groupby('cluster').size())
+                render_path = o.ensure_dir(os.path.join(args.folder, 'render'))
+                for ix, dfg in df.groupby("cluster"):
+                    _path = os.path.join(root, 'render', str(int(ix)))
+                    dest_path = o.ensure_dir(_path)
 
-    g = sns.FacetGrid(df[df['cluster'] > 0], row="cluster", height=1.5, aspect=5)
-    g = g.map(sns.distplot, "c1_d_nuc_centr", rug=True)
-    g.savefig('centr-distribution-c.pdf')
+                    move_images(dfg, render_path=render_path, destination_folder=dest_path)
+            else:
 
-    g = sns.FacetGrid(df[df['cluster'] > 0], row="cluster", height=1.5, aspect=5)
-    g = g.map(sns.distplot, "c1_d_nuc_bound", rug=True)
-    g.savefig('centr-distribution-b.pdf')
+                for dir in directories:
+                    if dir == 'render': continue
+                    cfg_path = os.path.join(args.folder, 'out', dir, 'gate.cfg')
+                    if not os.path.exists(cfg_path):
+                        logger.warning('%s not found!' % cfg_path)
+                        continue
+                    ellipse1, ellipse2, circle, rows, cols = read_gate_config(cfg_path)
 
-    #
-    #
-    #
-    fig = plt.figure(figsize=(5, 5))
-    ax = fig.gca()
-    sns.scatterplot(x="c1_d_nuc_centr", y="c1_int",
-                    alpha=.5, palette="PRGn", data=df, ax=ax)
-    ax.set_xlabel('distance [um]')
-    ax.set_ylabel('centrosome intensity [AU]')
-    ax.xaxis.set_major_formatter(formatter)
-    ax.yaxis.set_major_formatter(formatter)
-    ax.semilogy()
+                    pd_path = os.path.join(args.folder, 'out', dir, 'nuclei.pandas')
+                    df = pd.read_pickle(pd_path)
+                    df["geometry"] = df.apply(
+                        lambda row: shapely.geometry.Point(row['dna_int'] / 1e6 / 6, np.log(row['edu_int'])),
+                        axis=1)
 
-    fig.savefig('centr-intensity.pdf')
+                    den = DraggableEightNote(ax, ellipse1, ellipse2, circle, number_of_sphase_segments=4)
+                    write_gate_config(cfg_path, df, ellipse1, ellipse2, circle)
+                    df = gate(df, den)
 
-    df.loc[df['c1_int'] == 65535, 'c1_int'] = 0
-    g = sns.jointplot(x="c1_d_nuc_centr", y="c1_int", data=df,
-                      dropna=True, alpha=0.5)
-    ax = g.ax_joint
-    ax.set_ylim([0, 7500])
-    g.savefig('centr-intensity-joint.pdf')
+                    render_path = o.ensure_dir(os.path.join(args.folder, 'render'))
+                    for ix, dfg in df.groupby("cluster"):
+                        _path = os.path.join(args.folder, 'out', dir, 'render', str(int(ix)))
+                        dest_path = o.ensure_dir(_path)
 
-    plt.show()
+                        move_images(dfg, render_path=render_path, destination_folder=dest_path)
 
-    if False:
-        import sys
-        from PyQt4.QtCore import *
-        from PyQt4.QtGui import QApplication
-        from gui.explore import ExplorationGui
-        from gui.browse import BrowseGui
-
-        b_path = '/Volumes/Kidbeat/data/centr-dist(u2os)__2018-11-27T18_08_10-Measurement 1/'
-
-        base_path = os.path.abspath('%s' % os.getcwd())
-        logging.info('Qt version:' + QT_VERSION_STR)
-        logging.info('PyQt version:' + PYQT_VERSION_STR)
-        logging.info('Working dir:' + os.getcwd())
-        logging.info('Base dir:' + base_path)
-        os.chdir(base_path)
-
-        app = QApplication(sys.argv)
-
-        egui = ExplorationGui()
-        operetta = o.Dataframe('out/nuclei.pandas', b_path)
-        bgui = BrowseGui(operetta=operetta, exploration_gui=egui)
-        # from pycallgraph import PyCallGraph
-        # from pycallgraph.output import GraphvizOutput
-        #
-        # with PyCallGraph(output=GraphvizOutput()):
-        bgui.show()
-        egui.show()
-        code = app.exec_()
-        sys.exit(code)
+    if args.gate:
+        for root, directories, filenames in os.walk(os.path.join(args.folder, 'out')):
+            pd_path = os.path.join(root, 'nuclei.pandas')
+            if os.path.exists(pd_path):
+                apply_gate_to_folder(pd_path=pd_path, out_path=root)
+            else:
+                for dir in directories:
+                    if dir == 'render': continue
+                    pd_path = os.path.join(args.folder, 'out', dir, 'nuclei.pandas')
+                    out_path = os.path.join(args.folder, 'out', dir)
+                    if not os.path.exists(pd_path):
+                        logger.warning('%s not found!' % pd_path)
+                        continue
+                    apply_gate_to_folder(pd_path=pd_path, out_path=out_path)
