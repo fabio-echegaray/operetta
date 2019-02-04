@@ -1,12 +1,14 @@
 import logging
 import os
 import traceback
+import warnings
 
 from exceptions import BadParameterError
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger('batch')
 logging.getLogger('matplotlib').setLevel(logging.ERROR)
+warnings.simplefilter(action='ignore', category=FutureWarning)
 
 
 def batch_process_operetta_folder(path, row=None, col=None, name=None):
