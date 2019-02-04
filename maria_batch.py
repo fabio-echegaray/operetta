@@ -121,6 +121,7 @@ if __name__ == '__main__':
     import measurements as m
     import operetta as o
 
+    # FIXME: this command is not working after refactoring
     """
         MAKE SURE YOU DON'T FORGET TO CALL
         module load python/intel/3.6.039
@@ -140,7 +141,6 @@ if __name__ == '__main__':
         df = pd.read_pickle(pd_path)
         pd_path = os.path.join(args.folder, 'out/nuclei.csv')
         df.to_csv(pd_path)
-        print(df)
 
         df["geometry"] = df.apply(lambda row: shapely.geometry.Point(row['dna_int'] / 1e6 / 6, np.log(row['edu_int'])),
                                   axis=1)
