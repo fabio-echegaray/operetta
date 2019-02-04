@@ -8,6 +8,7 @@ from exceptions import BadParameterError
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger('batch')
 logging.getLogger('matplotlib').setLevel(logging.ERROR)
+logging.getLogger('shapely').setLevel(logging.ERROR)
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
 
@@ -65,7 +66,11 @@ if __name__ == '__main__':
         import operetta as o
 
         operetta = o.FourChannels(args.folder, col=args.column, condition_name=args.name)
-        operetta.measure(args.id)
+        df = operetta.measure(args.id)
+
+        if args.render:
+            operetta.samples = df
+            operetta.save_render(args.id, max_width=300)
 
     if args.measure:
         import operetta as o
@@ -77,7 +82,7 @@ if __name__ == '__main__':
         logger.debug(args.name)
         batch_process_operetta_folder(args.folder, col=args.column, name=args.name)
 
-    if args.render:
+    if args.render and not args.id:
         import operetta as o
 
         for root, directories, filenames in os.walk(os.path.join(args.folder, 'out')):

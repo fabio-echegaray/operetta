@@ -51,7 +51,7 @@ if [ -z "$DATA_FOLDER" ]
 then
     echo "Please set \$DATA_FOLDER"
 else
-    python batch.py --id $SGE_TASK_ID $DATA_FOLDER
+    python batch.py --render --id $SGE_TASK_ID $DATA_FOLDER
     sleep 1
 fi
 echo

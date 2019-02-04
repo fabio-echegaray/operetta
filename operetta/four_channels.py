@@ -48,7 +48,24 @@ class FourChannels(Montage):
             path = os.path.abspath(os.path.join(basepath, 'render', name))
         return name, path
 
-    def save_render(self, row, col, fid, path=None, max_width=50):
+    def save_render(self, *args, **kwargs):
+        if len(args) == 1 and isinstance(args[0], int):
+            id = args[0]
+            r = self.files_gr.ix[id - 1]
+            row, col, fid = r['row'], r['col'], r['fid']
+            logger.debug('rendering id=%d row=%d col=%d fid=%d' % (id, row, col, fid))
+
+        elif len(args) == 3 and np.all([np.issubdtype(a, np.integer) for a in args]):
+            row, col, fid = args[0], args[1], args[2]
+        else:
+            logger.warning("there's nothing to render")
+            return
+
+        path=kwargs['path'] if 'path' in kwargs else None
+        max_width=kwargs['max_width'] if 'max_width' in kwargs else None
+        self._save_render_row_col_fid(row, col, fid, path=path, max_width=max_width)
+
+    def _save_render_row_col_fid(self, row, col, fid, path=None, max_width=50):
         if self.samples is None:
             raise NoSamplesError('pandas samples file is needed to use this function.')
 
@@ -186,11 +203,12 @@ class FourChannels(Montage):
             row, col, fid = args[0], args[1], args[2]
         else:
             logger.warning('nothing to save on this image')
-            return
+            return pd.DataFrame()
 
         df = self._measure_row_col_fid(row, col, fid)
         name = 'r%d-c%d-f%d.csv' % (row, col, fid)
         df.to_csv(self.save_path(name, subdir='pandas'), index=False)
+        return df
 
     def _measure_row_col_fid(self, row, col, fid):
         hoechst, tubulin, pericentrin, edu = self.max_projection(row, col, fid)
