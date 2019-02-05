@@ -3,6 +3,8 @@ import os
 import traceback
 import warnings
 
+from pandas.errors import EmptyDataError
+
 from exceptions import BadParameterError
 
 logging.basicConfig(level=logging.DEBUG)
@@ -50,6 +52,8 @@ if __name__ == '__main__':
                         help='measure_into_dataframe features on the dataset')
     parser.add_argument('--id', type=int,
                         help='measure an image of the stack with id into a csv file')
+    parser.add_argument('--collect', action='store_true',
+                        help='collect measurements from csv format to pandas dataframe')
     args = parser.parse_args()
 
     """
@@ -72,7 +76,36 @@ if __name__ == '__main__':
             operetta.samples = df
             operetta.save_render(args.id, max_width=300)
 
-    if args.measure:
+    if args.collect and not args.id:
+        import pandas as pd
+
+
+        def collect(path):
+            df = pd.DataFrame()
+            for root, directories, filenames in os.walk(os.path.join(path)):
+                for filename in filenames:
+                    ext = filename.split('.')[-1]
+                    if ext == 'csv':
+                        try:
+                            csv = pd.read_csv(os.path.join(root, filename))
+                            df = df.append(csv, ignore_index=True)
+                        except EmptyDataError:
+                            logger.warning('found empty csv file: %s' % filename)
+            return df
+
+
+        for root, directories, filenames in os.walk(os.path.join(args.folder, 'out')):
+            pd_path = os.path.join(root, 'pandas')
+            if os.path.isdir(pd_path):
+                df = collect(pd_path)
+                pd.to_pickle(df, os.path.join(root, 'nuclei.pandas'))
+            else:
+                for dir in directories:
+                    pd_path = os.path.join(args.folder, 'out', dir, 'pandas')
+                    df = collect(pd_path)
+                    pd.to_pickle(df, os.path.join(args.folder, 'out', dir, 'nuclei.pandas'))
+
+    if args.measure and not args.id:
         import operetta as o
         import pandas as pd
 
@@ -100,18 +133,18 @@ if __name__ == '__main__':
                     except o.NoSamplesError as e:
                         logger.error(e)
 
-    if args.plot:
+    if args.plot and not args.id:
         import matplotlib.pyplot as plt
         import pandas as pd
         import plots as p
         import operetta as o
 
-        pd_path = os.path.join(args.folder, 'out/nuclei.pandas')
+        pd_path = os.path.join(args.folder, 'out', 'nuclei.pandas')
         df = pd.read_pickle(pd_path)
-        pd_path = os.path.join(args.folder, 'out/nuclei.csv')
+        pd_path = os.path.join(args.folder, 'out', 'nuclei.csv')
         df.to_csv(pd_path)
 
         fig = plt.figure(figsize=(8, 8))
         p.facs(df, ax=fig.gca())
-        path = o.ensure_dir(os.path.join(args.folder, 'out/graphs/facs.pdf'))
+        path = o.ensure_dir(os.path.join(args.folder, 'out', 'graphs', 'facs.pdf'))
         fig.savefig(path)
