@@ -50,6 +50,8 @@ if __name__ == '__main__':
                         help='plot all graphs')
     parser.add_argument('--measure', action='store_true',
                         help='measure_into_dataframe features on the dataset')
+    parser.add_argument('--generate', action='store_true',
+                        help='creates a csv file with every image in the image folder')
     parser.add_argument('--id', type=int,
                         help='measure an image of the stack with id into a csv file')
     parser.add_argument('--collect', action='store_true',
@@ -65,6 +67,11 @@ if __name__ == '__main__':
 
     if args.measure and args.id:
         raise BadParameterError("measure and hpc modes are not allowed in the same command call")
+
+    if args.generate:
+        import operetta as o
+
+        o.FourChannels.generate_images_csv(args.folder)
 
     if args.id:
         import operetta as o

@@ -20,7 +20,6 @@ def ensure_dir(file_path):
 
 class Montage:
     def __init__(self, folder, row=None, col=None, condition_name=None):
-        l = list()
         self.base_path = folder
         self.images_path = os.path.join(folder, 'Images')
 
@@ -28,22 +27,8 @@ class Montage:
 
         csv_path = os.path.join(folder, 'out', 'operetta.csv')
         if not os.path.exists(csv_path):
-            logger.info("generating image file structure into a csv file...")
-            if not os.path.exists(self.images_path):
-                raise FileNotFoundError('Images folder is needed in this step.')
-
-            #  build a list of dicts for every image file in the directory
-            for root, directories, filenames in os.walk(folder):
-                for filename in filenames:
-                    ext = filename.split('.')[-1]
-                    if ext == 'tiff':
-                        _row, _col, f, p, ch, sk, fk, fl = [int(g) for g in re.search(
-                            'r([0-9]+)c([0-9]+)f([0-9]+)p([0-9]+)-ch([0-9]+)sk([0-9]+)fk([0-9]+)fl([0-9]+).tiff',
-                            filename).groups()]
-                        i = {'row': _row, 'col': _col, 'fid': f, 'p': p, 'ch': ch, 'sk': sk, 'fk': fk, 'fl': fl}
-                        l.append(i)
-            f = pd.DataFrame(l)
-            f.to_csv(self.save_path('operetta.csv'), index=False)
+            raise FileNotFoundError(
+                'File operetta.csv is missing in the folder structure. Generate the csv file first.')
         else:
             f = pd.read_csv(csv_path)
         self.files = f
@@ -127,3 +112,21 @@ class Montage:
     def save_path(self, filename, subdir=''):
         exp = self.name if self.name is not None else ''
         return ensure_dir(os.path.join(self.base_path, 'out', exp, subdir, filename))
+
+    @staticmethod
+    def generate_images_csv(base_folder):
+        #  build a list of dicts for every image file in the directory
+        l = list()
+        images_path = os.path.join(base_folder, 'Images')
+        for root, directories, filenames in os.walk(images_path):
+            for filename in filenames:
+                ext = filename.split('.')[-1]
+                if ext == 'tiff':
+                    _row, _col, f, p, ch, sk, fk, fl = [int(g) for g in re.search(
+                        'r([0-9]+)c([0-9]+)f([0-9]+)p([0-9]+)-ch([0-9]+)sk([0-9]+)fk([0-9]+)fl([0-9]+).tiff',
+                        filename).groups()]
+                    i = {'row': _row, 'col': _col, 'fid': f, 'p': p, 'ch': ch, 'sk': sk, 'fk': fk, 'fl': fl}
+                    l.append(i)
+        f = pd.DataFrame(l)
+        op_csv = ensure_dir(os.path.join(base_folder, 'out', 'operetta.csv'))
+        f.to_csv(op_csv, index=False)
