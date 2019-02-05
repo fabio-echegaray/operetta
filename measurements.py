@@ -174,7 +174,7 @@ def cell_boundary(tubulin, hoechst, threshold=80, markers=None):
     # gaussian blur on gabor filter result
     ksize = 31
     blur = cv2.GaussianBlur(bin1, (ksize, ksize), 0)
-    ret, bin2 = cv2.threshold(blur, threshold, 255, cv2.THRESH_OTSU)
+    ret, cells_mask = cv2.threshold(blur, threshold, 255, cv2.THRESH_OTSU)
     # ret, bin2 = cv2.threshold(blur, 70, 255, cv2.THRESH_BINARY)
 
     if markers is None:
@@ -184,8 +184,7 @@ def cell_boundary(tubulin, hoechst, threshold=80, markers=None):
         ret, bin_nuc = cv2.threshold(blur_nuc, 0, 255, cv2.THRESH_OTSU)
         markers = ndi.label(bin_nuc)[0]
 
-    gabor_proc = gabor
-    labels = morphology.watershed(-gabor_proc, markers, mask=bin2)
+    labels = morphology.watershed(-gabor, markers, mask=cells_mask)
 
     boundaries_list = list()
     # loop over the labels
@@ -200,4 +199,4 @@ def cell_boundary(tubulin, hoechst, threshold=80, markers=None):
         if len(boundary) >= 3:
             boundaries_list.append({'id': l, 'boundary': Polygon(boundary)})
 
-    return boundaries_list, gabor_proc
+    return boundaries_list, cells_mask > 255

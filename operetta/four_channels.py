@@ -1,3 +1,4 @@
+import itertools
 import os
 
 import shapely.wkt
@@ -243,8 +244,21 @@ class FourChannels(Montage):
         # --------------------
         #     Find cells
         # --------------------
-        cells, _ = m.cell_boundary(tubulin, hoechst)
-        # TODO: compute SNR of measurements
+        cells, cells_mask = m.cell_boundary(tubulin, hoechst)
+        #  filter polygons contained in others
+        for c in cells:
+            c['valid']=True
+        for c1, c2 in itertools.combinations(cells,2):
+            if not c['valid'] or not c['valid']: continue
+            if c1['boundary'].contains(c2['boundary']):
+                c2['valid'] = False
+            if c2['boundary'].contains(c1['boundary']):
+                c1['valid'] = False
+        cells = [c for c in cells if c['valid']]
+
+        # Compute SNR: Step 1. Calculate standard deviation of background
+        std_pericentrin = np.std(pericentrin[cells_mask])
+        u_pericentrin = np.mean(pericentrin[cells_mask])
 
         df = pd.DataFrame()
         for nucleus in nuclei:
@@ -279,7 +293,7 @@ class FourChannels(Montage):
                 cntrsmes = list()
                 for k, c in enumerate(cntr):
                     pt = Point(c[0], c[1])
-                    pti = m.integral_over_surface(pericentrin, pt.buffer(pix_per_um * 5))
+                    pti = m.integral_over_surface(pericentrin, pt.buffer(1 * pix_per_um))
                     cntrsmes.append({'id': k, 'pt': Point(c[0] / pix_per_um, c[1] / pix_per_um), 'i': pti})
                     cntrsmes = sorted(cntrsmes, key=lambda k: k['i'], reverse=True)
 
@@ -330,5 +344,9 @@ class FourChannels(Montage):
             df['fid'] = fid
             df['row'] = row
             df['col'] = col
+            df['std_pericentrin'] = std_pericentrin
+            df['mean_pericentrin'] = u_pericentrin
+            df['snr_c1'] = df['c1_int'] / std_pericentrin
+            df['snr_c2'] = df['c2_int'] / std_pericentrin
 
         return df
