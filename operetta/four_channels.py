@@ -19,6 +19,11 @@ from gui.utils import canvas_to_pil
 
 
 class FourChannels(Montage):
+    REJECTION_TOUCHING_FRAME = -1
+    REJECTION_NO_NUCLEUS = -2
+    REJECTION_TWO_NUCLEI = -3
+    REJECTION_CELL_TOO_BIG = -4
+
     def __init__(self, base_path, row=None, col=None, condition_name=None):
         logger.info('Initializing FourChannels object with pandas file from folder %s' % base_path)
         try:
@@ -119,6 +124,10 @@ class FourChannels(Montage):
         s = self.samples
         dfi = s[(s['row'] == row) & (s['col'] == col) & (s['fid'] == fid)]
         axg.cla()
+        width, height = hoechst_raw.shape
+        frame = Polygon([(0, 0), (0, width), (height, width), (height, 0)])
+        frx, fry = frame.exterior.xy
+        axg.plot(frx, fry, color='red', linewidth=2, solid_capstyle='round', zorder=1)
         for ix, smp in dfi.groupby('id'):
             nucleus = shapely.wkt.loads(smp['nucleus'].values[0])
             cell = shapely.wkt.loads(smp['cell'].values[0])
@@ -129,6 +138,7 @@ class FourChannels(Montage):
 
             # render and save closeup image
             axc.cla()
+            axc.plot(frx, fry, color='red', linewidth=2, solid_capstyle='round', zorder=1)
             p.render_cell(nucleus, cell, [c1, c2], ax=axc)
             w, h = hoechst_raw.shape
             axc.imshow(out, extent=[0, w / self.pix_per_um, h / self.pix_per_um, 0])
@@ -175,11 +185,9 @@ class FourChannels(Montage):
         # see https://github.com/Toblerity/Shapely/issues/346
         EPS = 1e-15
         if frame.distance(cell_polygon) < EPS or frame.distance(nuclei_polygon) < EPS:
-            logger.debug('sample rejected because it was touching the frame')
-            return False
+            return False, FourChannels.REJECTION_TOUCHING_FRAME
         if not cell_polygon.contains(nuclei_polygon):
-            logger.debug("sample rejected because it didn't contain a nucleus")
-            return False
+            return False, FourChannels.REJECTION_NO_NUCLEUS
 
         # make sure that there's only one nucleus inside cell
         if nuclei_list is not None:
@@ -189,13 +197,15 @@ class FourChannels(Montage):
                 if cell_polygon.contains(nuc):
                     n_nuc += 1
             if n_nuc > 1:
-                logger.debug("sample rejected because cell had more than two nuclei")
-                return False
+                return False, FourChannels.REJECTION_TWO_NUCLEI
 
         # nucleus area should be at least three to four times the are of the cell
-        # TODO: do it
+        area_ratio = cell_polygon.area / nuclei_polygon.area
+        if area_ratio > 5:
+            return False, FourChannels.REJECTION_CELL_TOO_BIG
+        logger.debug('sample accepted with an area ratio of %0.2f' % area_ratio)
 
-        return True
+        return True, None
 
     @staticmethod
     def is_valid_measured_row(row):
@@ -253,14 +263,21 @@ class FourChannels(Montage):
 
         df = pd.DataFrame()
         w, h = tubulin.shape
-        for nucleus in nuclei:
-            nucl_bnd = nucleus['boundary']
-            x0, y0, xf, yf = [int(u) for u in nucleus['boundary'].bounds]
+        touching_fr = too_big = no_nuclei = two_nuclei = 0
+        # iterate through all cells
+        for cl in cells:
+            logger.debug("processing cell id %d" % cl['id'])
+            cell_bnd = cl['boundary']
+            for nucleus in nuclei:
+                nucl_bnd = nucleus['boundary']
+                x0, y0, xf, yf = [int(u) for u in nucleus['boundary'].bounds]
 
-            # iterate through all cells
-            for cl in cells:
-                cell_bnd = cl['boundary']
-                if self.is_valid_sample(w, h, cell_bnd, nucl_bnd, nuclei):
+                valid_sample, reason = self.is_valid_sample(w, h, cell_bnd, nucl_bnd, nuclei)
+                if reason == FourChannels.REJECTION_TOUCHING_FRAME: touching_fr += 1
+                if reason == FourChannels.REJECTION_NO_NUCLEUS: no_nuclei += 1
+                if reason == FourChannels.REJECTION_TWO_NUCLEI: two_nuclei += 1
+                if reason == FourChannels.REJECTION_CELL_TOO_BIG: too_big += 1
+                if valid_sample:
                     tubulin_int = m.integral_over_surface(tubulin, cell_bnd)
                     tub_density = tubulin_int / cell_bnd.area
                     if tub_density < 250:
@@ -327,6 +344,10 @@ class FourChannels(Montage):
                     })
                     df = df.append(d, ignore_index=True, sort=False)
 
+        logger.info("%d samples rejected because they were touching the frame" % touching_fr)
+        logger.info("%d samples rejected because cell didn't have a nucleus" % no_nuclei)
+        logger.info("%d samples rejected because cell had more than two nuclei" % two_nuclei)
+        logger.info("%d samples rejected because cell area was too big" % too_big)
         if len(df) > 0:
             # Compute SNR: Step 1. Calculate standard deviation of background
             logger.debug('computing std dev of background for SNR calculation')
