@@ -125,8 +125,8 @@ if __name__ == '__main__':
     if args.render and not args.id:
         import operetta as o
 
-        for root, directories, filenames in os.walk(os.path.join(args.folder, 'out')):
-            pd_path = os.path.join(root, 'nuclei.pandas')
+        for root, directories, filenames in os.walk(os.path.join(args.folder)):
+            pd_path = os.path.join(root, 'out', 'nuclei.pandas')
             if os.path.exists(pd_path):
                 try:
                     batch_render(root)

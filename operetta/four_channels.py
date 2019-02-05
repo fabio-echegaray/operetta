@@ -1,4 +1,3 @@
-import itertools
 import os
 
 import shapely.wkt
@@ -174,22 +173,25 @@ class FourChannels(Montage):
         nuclei_polygon = affinity.scale(nuclei_polygon, xfact=self.pix_per_um, yfact=self.pix_per_um, origin=(0, 0, 0))
         cell_polygon = affinity.scale(cell_polygon, xfact=self.pix_per_um, yfact=self.pix_per_um, origin=(0, 0, 0))
 
-        # FIXME: not working
-        if frame.touches(nuclei_polygon.buffer(2)):
+        # instead of using DE-9IM predicates, use a more robust strategy
+        # see https://github.com/Toblerity/Shapely/issues/346
+        EPS = 1e-15
+        if frame.distance(cell_polygon) < EPS or frame.distance(nuclei_polygon) < EPS:
             logger.debug('sample rejected because it was touching the frame')
             return False
         if not cell_polygon.contains(nuclei_polygon):
-            # logger.debug("sample rejected because it didn't contain a nucleus")
+            logger.debug("sample rejected because it didn't contain a nucleus")
             return False
 
         # make sure that there's only one nucleus inside cell
         if nuclei_list is not None:
             n_nuc = 0
             for ncl in nuclei_list:
-                nuclei = ncl['boundary']
-                if cell_polygon.contains(nuclei):
+                nuc = affinity.scale(ncl['boundary'], xfact=self.pix_per_um, yfact=self.pix_per_um, origin=(0, 0, 0))
+                if cell_polygon.contains(nuc):
                     n_nuc += 1
-            if n_nuc != 1:
+            if n_nuc > 1:
+                logger.debug("sample rejected because cell had more than two nuclei")
                 return False
 
         # nucleus area should be at least three to four times the are of the cell
@@ -234,113 +236,105 @@ class FourChannels(Montage):
         #     Find nuclei
         # --------------------
         imgseg, nuclei = m.nuclei_segmentation(hoechst, radius=r * pix_per_um)
-        n_nuclei = len(np.unique(imgseg)) - 1  # background is labeled as 0 and is not counted in
+        nuclei = m.exclude_contained(nuclei)
+        n_nuclei = len(nuclei)
 
         if n_nuclei == 0:
             logger.warning("couldn't find nuclei in image")
             return pd.DataFrame()
         self.add_mesurement(row, col, fid, 'nuclei found', n_nuclei)
+        logger.debug("%d nuclei found in image" % n_nuclei)
 
         # --------------------
         #     Find cells
         # --------------------
         cells, cells_mask = m.cell_boundary(tubulin, hoechst)
         #  filter polygons contained in others
-        for c in cells:
-            c['valid']=True
-        for c1, c2 in itertools.combinations(cells,2):
-            if not c['valid'] or not c['valid']: continue
-            if c1['boundary'].contains(c2['boundary']):
-                c2['valid'] = False
-            if c2['boundary'].contains(c1['boundary']):
-                c1['valid'] = False
-        cells = [c for c in cells if c['valid']]
-
-        # Compute SNR: Step 1. Calculate standard deviation of background
-        std_pericentrin = np.std(pericentrin[cells_mask])
-        u_pericentrin = np.mean(pericentrin[cells_mask])
+        cells = m.exclude_contained(cells)
+        logger.debug("%d cells found in image" % len(cells))
 
         df = pd.DataFrame()
+        w, h = tubulin.shape
         for nucleus in nuclei:
+            nucl_bnd = nucleus['boundary']
             x0, y0, xf, yf = [int(u) for u in nucleus['boundary'].bounds]
 
-            # search for closest cell boundary based on centroids
-            clls = list()
+            # iterate through all cells
             for cl in cells:
-                clls.append({'id': cl['id'],
-                             'boundary': cl['boundary'],
-                             'd': cl['boundary'].centroid.distance(nucleus['boundary'].centroid)})
-            clls = sorted(clls, key=lambda k: k['d'])
+                cell_bnd = cl['boundary']
+                if self.is_valid_sample(w, h, cell_bnd, nucl_bnd, nuclei):
+                    tubulin_int = m.integral_over_surface(tubulin, cell_bnd)
+                    tub_density = tubulin_int / cell_bnd.area
+                    if tub_density < 250:
+                        logger.warning("sample rejected after validation because it had a low tubulin density")
+                        logger.debug('tubulin density in cell: %0.2f, intensity %0.2f, area %0.2f' % (
+                            tub_density, tubulin_int, cell_bnd.area))
+                        continue
 
-            nucl_bnd = nucleus['boundary']
-            cell_bnd = clls[0]['boundary']
-            w, h = tubulin.shape
-            if self.is_valid_sample(w, h, cell_bnd, nucl_bnd, nuclei):
-                tubulin_int = m.integral_over_surface(tubulin, cell_bnd)
-                tub_density = tubulin_int / cell_bnd.area
-                if tub_density < 250:
-                    logger.warning("sample rejected after validation because it had a low tubulin density")
-                    logger.debug('tubulin density in cell: %0.2f, intensity %0.2f, area %0.2f' % (
-                        tub_density, tubulin_int, cell_bnd.area))
-                    continue
+                    pericentrin_crop = pericentrin[y0:yf, x0:xf]
+                    logger.info('applying centrosome algorithm for nuclei %d' % nucleus['id'])
 
-                pericentrin_crop = pericentrin[y0:yf, x0:xf]
-                logger.info('applying centrosome algorithm for nuclei %d' % nucleus['id'])
+                    cntr = m.centrosomes(pericentrin_crop, min_size=0.2 * pix_per_um, max_size=0.5 * pix_per_um,
+                                         threshold=0.01)
+                    cntr[:, 0] += x0
+                    cntr[:, 1] += y0
+                    cntrsmes = list()
+                    for k, c in enumerate(cntr):
+                        pt = Point(c[0], c[1])
+                        pti = m.integral_over_surface(pericentrin, pt.buffer(1 * pix_per_um))
+                        cntrsmes.append({'id': k, 'pt': Point(c[0] / pix_per_um, c[1] / pix_per_um), 'i': pti})
+                        cntrsmes = sorted(cntrsmes, key=lambda k: k['i'], reverse=True)
 
-                cntr = m.centrosomes(pericentrin_crop, max_sigma=pix_per_um * 0.5)
-                cntr[:, 0] += x0
-                cntr[:, 1] += y0
-                cntrsmes = list()
-                for k, c in enumerate(cntr):
-                    pt = Point(c[0], c[1])
-                    pti = m.integral_over_surface(pericentrin, pt.buffer(1 * pix_per_um))
-                    cntrsmes.append({'id': k, 'pt': Point(c[0] / pix_per_um, c[1] / pix_per_um), 'i': pti})
-                    cntrsmes = sorted(cntrsmes, key=lambda k: k['i'], reverse=True)
+                    logger.debug('found {:d} centrosomes'.format(len(cntrsmes)))
+                    if len(cntrsmes) == 0: continue
 
-                # logger.debug('centrosomes {:s}'.format(str(cntrsmes)))
-                logger.debug('found {:d} centrosomes'.format(len(cntrsmes)))
-                if len(cntrsmes) == 0: continue
+                    twocntr = len(cntrsmes) >= 2
+                    c1 = cntrsmes[0] if len(cntrsmes) > 0 else None
+                    c2 = cntrsmes[1] if twocntr else None
 
-                twocntr = len(cntrsmes) >= 2
-                c1 = cntrsmes[0] if len(cntrsmes) > 0 else None
-                c2 = cntrsmes[1] if twocntr else None
+                    edu_int = m.integral_over_surface(edu, nucl_bnd)
+                    dna_int = m.integral_over_surface(hoechst, nucl_bnd)
 
-                edu_int = m.integral_over_surface(edu, nucl_bnd)
-                dna_int = m.integral_over_surface(hoechst, nucl_bnd)
+                    nucl_bndum = affinity.scale(nucl_bnd, xfact=self.um_per_pix, yfact=self.um_per_pix,
+                                                origin=(0, 0, 0))
+                    cell_bndum = affinity.scale(cell_bnd, xfact=self.um_per_pix, yfact=self.um_per_pix,
+                                                origin=(0, 0, 0))
 
-                nucl_bndum = affinity.scale(nucl_bnd, xfact=self.um_per_pix, yfact=self.um_per_pix, origin=(0, 0, 0))
-                cell_bndum = affinity.scale(cell_bnd, xfact=self.um_per_pix, yfact=self.um_per_pix, origin=(0, 0, 0))
-
-                lc = 2 if c2 is not None else 1 if c1 is not None else np.nan
-                # TODO: Add units support
-                d = pd.DataFrame(data={
-                    'id': [nucleus['id']],
-                    'dna_int': [dna_int],
-                    'edu_int': [edu_int],
-                    'tubulin_int': [tubulin_int],
-                    'dna_dens': [dna_int / nucl_bnd.area],
-                    'tubulin_dens': [tubulin_int / cell_bnd.area],
-                    'centrosomes': [lc],
-                    'c1_int': [c1['i'] if c1 is not None else np.nan],
-                    'c2_int': [c2['i'] if c2 is not None else np.nan],
-                    'c1_d_nuc_centr': [nucl_bndum.centroid.distance(c1['pt']) if c1 is not None else np.nan],
-                    'c2_d_nuc_centr': [nucl_bndum.centroid.distance(c2['pt']) if twocntr else np.nan],
-                    'c1_d_nuc_bound': [nucl_bndum.exterior.distance(c1['pt']) if c1 is not None else np.nan],
-                    'c2_d_nuc_bound': [nucl_bndum.exterior.distance(c2['pt']) if twocntr else np.nan],
-                    'c1_d_cell_centr': [cell_bndum.centroid.distance(c1['pt']) if c1 is not None else np.nan],
-                    'c2_d_cell_centr': [cell_bndum.centroid.distance(c2['pt']) if twocntr else np.nan],
-                    'c1_d_cell_bound': [cell_bndum.exterior.distance(c1['pt']) if c1 is not None else np.nan],
-                    'c2_d_cell_bound': [cell_bndum.exterior.distance(c2['pt']) if twocntr else np.nan],
-                    'nuc_centr_d_cell_centr': [nucl_bndum.centroid.distance(cell_bndum.centroid)],
-                    'c1_d_c2': [c1['pt'].distance(c2['pt']) if twocntr else np.nan],
-                    'cell': cell_bndum.wkt,
-                    'nucleus': nucl_bndum.wkt,
-                    'c1': c1['pt'].wkt if c1 is not None else None,
-                    'c2': c2['pt'].wkt if c2 is not None else None,
-                })
-                df = df.append(d, ignore_index=True, sort=False)
+                    lc = 2 if c2 is not None else 1 if c1 is not None else np.nan
+                    # TODO: Add units support
+                    d = pd.DataFrame(data={
+                        'id': [nucleus['id']],
+                        'dna_int': [dna_int],
+                        'edu_int': [edu_int],
+                        'tubulin_int': [tubulin_int],
+                        'dna_dens': [dna_int / nucl_bnd.area],
+                        'tubulin_dens': [tubulin_int / cell_bnd.area],
+                        'centrosomes': [lc],
+                        'c1_int': [c1['i'] if c1 is not None else np.nan],
+                        'c2_int': [c2['i'] if c2 is not None else np.nan],
+                        'c1_d_nuc_centr': [nucl_bndum.centroid.distance(c1['pt']) if c1 is not None else np.nan],
+                        'c2_d_nuc_centr': [nucl_bndum.centroid.distance(c2['pt']) if twocntr else np.nan],
+                        'c1_d_nuc_bound': [nucl_bndum.exterior.distance(c1['pt']) if c1 is not None else np.nan],
+                        'c2_d_nuc_bound': [nucl_bndum.exterior.distance(c2['pt']) if twocntr else np.nan],
+                        'c1_d_cell_centr': [cell_bndum.centroid.distance(c1['pt']) if c1 is not None else np.nan],
+                        'c2_d_cell_centr': [cell_bndum.centroid.distance(c2['pt']) if twocntr else np.nan],
+                        'c1_d_cell_bound': [cell_bndum.exterior.distance(c1['pt']) if c1 is not None else np.nan],
+                        'c2_d_cell_bound': [cell_bndum.exterior.distance(c2['pt']) if twocntr else np.nan],
+                        'nuc_centr_d_cell_centr': [nucl_bndum.centroid.distance(cell_bndum.centroid)],
+                        'c1_d_c2': [c1['pt'].distance(c2['pt']) if twocntr else np.nan],
+                        'cell': cell_bndum.wkt,
+                        'nucleus': nucl_bndum.wkt,
+                        'c1': c1['pt'].wkt if c1 is not None else None,
+                        'c2': c2['pt'].wkt if c2 is not None else None,
+                    })
+                    df = df.append(d, ignore_index=True, sort=False)
 
         if len(df) > 0:
+            # Compute SNR: Step 1. Calculate standard deviation of background
+            logger.debug('computing std dev of background for SNR calculation')
+            std_pericentrin = np.std(pericentrin[cells_mask])
+            u_pericentrin = np.mean(pericentrin[cells_mask])
+
             df['fid'] = fid
             df['row'] = row
             df['col'] = col

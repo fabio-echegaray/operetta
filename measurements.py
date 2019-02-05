@@ -1,3 +1,4 @@
+import itertools
 import logging
 import math
 from math import sqrt
@@ -14,7 +15,6 @@ import skimage.morphology as morphology
 import skimage.segmentation as segmentation
 import skimage.transform as tf
 from shapely.geometry.polygon import Polygon
-from scipy.ndimage.morphology import distance_transform_edt
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger('hhlab')
@@ -125,8 +125,8 @@ def nuclei_segmentation(image, radius=10):
     return labels, _list
 
 
-def centrosomes(image, max_sigma=1):
-    blobs_log = feature.blob_log(image, min_sigma=0.05, max_sigma=max_sigma, num_sigma=10, threshold=.017)
+def centrosomes(image, min_size=0.2, max_size=0.5, threshold=0.1):
+    blobs_log = feature.blob_log(image, min_sigma=min_size, max_sigma=max_size, num_sigma=10, threshold=threshold)
     # blobs_log = feature.blob_doh(image, min_sigma=0.05, max_sigma=max_sigma, num_sigma=10, threshold=.1)
     # Compute radii in the 3rd column.
     blobs_log[:, 2] = blobs_log[:, 2] * sqrt(2)
@@ -200,3 +200,16 @@ def cell_boundary(tubulin, hoechst, threshold=80, markers=None):
             boundaries_list.append({'id': l, 'boundary': Polygon(boundary)})
 
     return boundaries_list, cells_mask > 255
+
+
+def exclude_contained(polygons):
+    if polygons is None: return []
+    for p in polygons:
+        p['valid'] = True
+    for p1, p2 in itertools.combinations(polygons, 2):
+        if not p['valid'] or not p['valid']: continue
+        if p1['boundary'].contains(p2['boundary']):
+            p2['valid'] = False
+        if p2['boundary'].contains(p1['boundary']):
+            p1['valid'] = False
+    return [p for p in polygons if p['valid']]
