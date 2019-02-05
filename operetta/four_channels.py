@@ -48,8 +48,6 @@ class FourChannels(Montage):
 
     @staticmethod
     def filename_of_render(row, basepath):
-        if len(row) > 1:
-            raise Exception('only 1 row allowed')
         name = 'r%d-c%d-f%d-i%d.jpg' % (row['row'], row['col'], row['fid'], row['id'])
         if os.path.basename(basepath) == 'render':
             path = os.path.abspath(os.path.join(basepath, name))

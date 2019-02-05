@@ -11,7 +11,6 @@ import shapely.geometry
 import shapely.wkt
 from matplotlib.patches import Ellipse
 
-import measurements as m
 from gui.draggable import DraggableEightNote
 import operetta as o
 import plots as p
@@ -137,7 +136,7 @@ def gate(df, den):
 
 def apply_gate_to_folder(pd_path, out_path):
     df = pd.read_pickle(pd_path)
-    df = df[df.apply(m.is_valid_measured_row, axis=1)]
+    df = df[df.apply(o.FourChannels.is_valid_measured_row, axis=1)]
     # print(df.groupby(['fid', 'row', 'col', 'id']).size())
     # print(len(df.groupby(['fid', 'row', 'col', 'id']).size()))
 
