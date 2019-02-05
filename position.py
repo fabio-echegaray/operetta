@@ -25,7 +25,7 @@ pd.set_option('display.width', 320)
 def move_images(df, render_path, destination_folder):
     os.makedirs(destination_folder, exist_ok=True)
     for i, r in df.iterrows():
-        name, original_path = o.FourChannels.render_filename(r, render_path)
+        name, original_path = o.FourChannels.filename_of_render(r, render_path)
         destination_path = os.path.join(destination_folder, name)
         try:
             logger.info('moving %s to %s' % (name, destination_folder))
@@ -163,7 +163,6 @@ def apply_gate_to_folder(pd_path, out_path):
     write_gate_config(cfg_path, df, ellipse1, ellipse2, circle)
     df["area_nucleus"] = df.apply(lambda row: shapely.wkt.loads(row['nucleus']).area, axis=1)
     df = gate(df, den)
-    print(df[["area_nucleus", "cluster"]])
     rorder = sorted(df["cluster"].unique())
 
     g = sns.FacetGrid(df, row="cluster", row_order=rorder, height=1.5, aspect=5)

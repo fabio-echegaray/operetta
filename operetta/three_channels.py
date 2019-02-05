@@ -16,7 +16,7 @@ from gui.utils import canvas_to_pil
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger('hhlab')
 
-
+# FIXME: this class is not working after major refactoring of the FourChannels class
 class ThreeChannels(o.Montage):
     def __init__(self, samples_path, base_path):
         self.samples = pd.read_pickle(samples_path)
@@ -86,7 +86,7 @@ class ThreeChannels(o.Montage):
         ax = fig.gca()
 
         if path is None:
-            basepath = os.path.dirname(self.dir)
+            basepath = os.path.dirname(self.images_path)
             basepath = os.path.abspath(os.path.join(basepath, 'render'))
         else:
             basepath = os.path.abspath(path)
