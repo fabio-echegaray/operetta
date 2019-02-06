@@ -161,21 +161,24 @@ def apply_gate_to_folder(pd_path, out_path):
 
     write_gate_config(cfg_path, df, ellipse1, ellipse2, circle)
     df["area_nucleus"] = df.apply(lambda row: shapely.wkt.loads(row['nucleus']).area, axis=1)
+    df["min_dist_to_nuclear_boundary"] = df.apply(lambda row: min(row['c1_d_nuc_bound'], row['c2_d_nuc_bound']), axis=1)
+    df["min_dist_to_nuclear_center"] = df.apply(lambda row: min(row['c1_d_nuc_centr'], row['c2_d_nuc_centr']), axis=1)
+    df["min_dist_to_cell_boundary"] = df.apply(lambda row: min(row['c1_d_cell_bound'], row['c2_d_cell_bound']), axis=1)
     df = gate(df, den)
     rorder = sorted(df["cluster"].unique())
 
     g = sns.FacetGrid(df, row="cluster", row_order=rorder, height=1.5, aspect=5)
-    g = g.map(sns.distplot, "c1_d_nuc_centr", rug=True)
+    g = g.map(sns.distplot, "min_dist_to_nuclear_center", rug=True)
     g.axes[-1][0].set_xlim([-1, 20])
     g.savefig('{:s}/centr-distribution-nucleus-center.pdf'.format(out_path))
 
     g = sns.FacetGrid(df, row="cluster", row_order=rorder, height=1.5, aspect=5)
-    g = g.map(sns.distplot, "c1_d_nuc_bound", rug=True)
+    g = g.map(sns.distplot, "min_dist_to_nuclear_boundary", rug=True)
     g.axes[-1][0].set_xlim([-1, 20])
     g.savefig('{:s}/centr-distribution-nucleus-boundary.pdf'.format(out_path))
 
     g = sns.FacetGrid(df, row="cluster", row_order=rorder, height=1.5, aspect=5)
-    g = g.map(sns.distplot, "c1_d_cell_bound", rug=True)
+    g = g.map(sns.distplot, "min_dist_to_cell_boundary", rug=True)
     g.axes[-1][0].set_xlim([-1, 30])
     g.savefig('{:s}/centr-distribution-cell-boundary.pdf'.format(out_path))
 
@@ -184,10 +187,10 @@ def apply_gate_to_folder(pd_path, out_path):
     g.axes[-1][0].set_xlim([-1, 20])
     g.savefig('{:s}/centr-distribution-nuc-cell.pdf'.format(out_path))
 
-    g = sns.FacetGrid(df, row="cluster", row_order=rorder, height=1.5, aspect=5)
-    g = g.map(sns.distplot, "c1_d_c2", rug=True)
-    g.axes[-1][0].set_xlim([-1, 10])
-    g.savefig('{:s}/centr-distribution-inter-centr.pdf'.format(out_path))
+    # g = sns.FacetGrid(df, row="cluster", row_order=rorder, height=1.5, aspect=5)
+    # g = g.map(sns.distplot, "c1_d_c2", rug=True)
+    # g.axes[-1][0].set_xlim([-1, 10])
+    # g.savefig('{:s}/centr-distribution-inter-centr.pdf'.format(out_path))
 
     g = sns.FacetGrid(df, row="cluster", row_order=rorder, height=1.5, aspect=5)
     g = g.map(sns.distplot, "area_nucleus", rug=True)
@@ -276,6 +279,7 @@ if __name__ == '__main__':
             else:
                 for dir in directories:
                     if dir == 'render': continue
+                    logger.info("processing %s" % dir)
                     pd_path = os.path.join(args.folder, 'out', dir, 'nuclei.pandas')
                     out_path = os.path.join(args.folder, 'out', dir)
                     if not os.path.exists(pd_path):

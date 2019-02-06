@@ -114,7 +114,7 @@ class Montage:
         return ensure_dir(os.path.join(self.base_path, 'out', exp, subdir, filename))
 
     @staticmethod
-    def generate_images_csv(base_folder):
+    def generate_images_structure(base_folder):
         #  build a list of dicts for every image file in the directory
         l = list()
         images_path = os.path.join(base_folder, 'Images')
@@ -128,5 +128,5 @@ class Montage:
                     i = {'row': _row, 'col': _col, 'fid': f, 'p': p, 'ch': ch, 'sk': sk, 'fk': fk, 'fl': fl}
                     l.append(i)
         f = pd.DataFrame(l)
-        op_csv = ensure_dir(os.path.join(base_folder, 'out', 'operetta.csv'))
-        f.to_csv(op_csv, index=False)
+
+        return f

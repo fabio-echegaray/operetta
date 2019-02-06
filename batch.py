@@ -71,7 +71,14 @@ if __name__ == '__main__':
     if args.generate:
         import operetta as o
 
-        o.FourChannels.generate_images_csv(args.folder)
+        f = o.FourChannels.generate_images_structure(args.folder)
+        op_csv = o.ensure_dir(os.path.join(args.folder, 'out', 'operetta.csv'))
+        f.to_csv(op_csv, index=False)
+
+        print("csv file generated!")
+
+        fgr = f.groupby(['row', 'col', 'fid']).size().reset_index()
+        print("%d image stacks available." % len(fgr))
 
     if args.id:
         import operetta as o
