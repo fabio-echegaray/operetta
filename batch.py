@@ -1,3 +1,5 @@
+import configparser
+import json
 import logging
 import os
 import traceback
@@ -5,6 +7,7 @@ import warnings
 
 from pandas.errors import EmptyDataError
 
+import operetta as o
 from exceptions import BadParameterError
 
 logging.basicConfig(level=logging.DEBUG)
@@ -14,8 +17,8 @@ logging.getLogger('shapely').setLevel(logging.ERROR)
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
 
-def batch_process_operetta_folder(path, row=None, col=None, name=None):
-    operetta = o.FourChannels(path, row=row, col=col, condition_name=name)
+def batch_process_operetta_folder(path):
+    operetta = o.FourChannels(path)
     outdf = pd.DataFrame()
     for row, col, fid in operetta.stack_generator():
         try:
@@ -28,10 +31,42 @@ def batch_process_operetta_folder(path, row=None, col=None, name=None):
     if not outdf.empty: pd.to_pickle(outdf, operetta.save_path('nuclei.pandas'))
 
 
-def batch_render(images_path, name=None):
+def batch_render(images_path):
     operetta = o.FourChannels(images_path)
     for row, col, fid in operetta.stack_generator():
         operetta.save_render(row, col, fid, max_width=300)
+
+
+def collect(path):
+    df = pd.DataFrame()
+    for root, directories, filenames in os.walk(os.path.join(path)):
+        for filename in filenames:
+            ext = filename.split('.')[-1]
+            if ext == 'csv':
+                try:
+                    csv = pd.read_csv(os.path.join(root, filename))
+                    df = df.append(csv, ignore_index=True)
+                except EmptyDataError:
+                    # logger.warning('found empty csv file: %s' % filename)
+                    pass
+    return df
+
+
+def wells_config(fname):
+    logging.info('parsing wells.cfg')
+    if os.path.isfile(fname):
+        with open(fname, 'r') as configfile:
+            config = configparser.ConfigParser(strict=False)
+            config.read_file(configfile)
+
+            logging.debug('sections found in file ' + str(config.sections()))
+
+            for section in config.sections():
+                if section[:3] == 'Tag':
+                    name = config.get(section, 'name')
+                    rows = json.loads(config.get(section, 'rows'))
+                    cols = json.loads(config.get(section, 'cols'))
+                    yield name, rows, cols
 
 
 if __name__ == '__main__':
@@ -40,10 +75,6 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Process operetta images.')
     parser.add_argument('folder', metavar='F', type=str,
                         help='folder where operetta images reside')
-    parser.add_argument('--column', type=int,
-                        help='column to restrict the analysis on')
-    parser.add_argument('--name', type=str,
-                        help='name for the condition of the experiment')
     parser.add_argument('--render', action='store_true',
                         help='render images (in a folder called render up in the hierarchy)')
     parser.add_argument('--plot', action='store_true',
@@ -83,7 +114,7 @@ if __name__ == '__main__':
     if args.id:
         import operetta as o
 
-        operetta = o.FourChannels(args.folder, col=args.column, condition_name=args.name)
+        operetta = o.FourChannels(args.folder)
         df = operetta.measure(args.id)
 
         if args.render:
@@ -93,41 +124,26 @@ if __name__ == '__main__':
     if args.collect and not args.id:
         import pandas as pd
 
-
-        def collect(path):
-            df = pd.DataFrame()
-            for root, directories, filenames in os.walk(os.path.join(path)):
-                for filename in filenames:
-                    ext = filename.split('.')[-1]
-                    if ext == 'csv':
-                        try:
-                            csv = pd.read_csv(os.path.join(root, filename))
-                            df = df.append(csv, ignore_index=True)
-                        except EmptyDataError:
-                            logger.warning('found empty csv file: %s' % filename)
-            return df
-
-
+        well_cfg_path = os.path.join(args.folder, 'out', 'wells.cfg')
         for root, directories, filenames in os.walk(os.path.join(args.folder, 'out')):
             pd_path = os.path.join(root, 'pandas')
             if os.path.isdir(pd_path):
                 df = collect(pd_path)
-                pd.to_pickle(df, os.path.join(root, 'nuclei.pandas'))
-            else:
-                for dir in directories:
-                    pd_path = os.path.join(args.folder, 'out', dir, 'pandas')
-                    df = collect(pd_path)
-                    pd.to_pickle(df, os.path.join(args.folder, 'out', dir, 'nuclei.pandas'))
+                if os.path.exists(well_cfg_path):
+                    for name, rows, cols in wells_config(well_cfg_path):
+                        cnd = df[(df['row'].isin(rows)) & (df['col'].isin(cols))]
+                        cnd_path = o.ensure_dir(os.path.join(root, name, 'nuclei.pandas'))
+                        pd.to_pickle(cnd, cnd_path)
+                else:
+                    pd.to_pickle(df, os.path.join(root, 'nuclei.pandas'))
 
     if args.measure and not args.id:
         import operetta as o
         import pandas as pd
 
-        logger.debug('------------------------- MEASURING -------------------------')
+        logger.info('------------------------- MEASURING -------------------------')
         logger.debug(args.folder)
-        logger.debug(args.column)
-        logger.debug(args.name)
-        batch_process_operetta_folder(args.folder, col=args.column, name=args.name)
+        batch_process_operetta_folder(args.folder)
 
     if args.render and not args.id:
         import operetta as o

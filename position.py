@@ -224,26 +224,28 @@ if __name__ == '__main__':
     if args.sort:
         ax = plt.gca()
         for root, directories, filenames in os.walk(os.path.join(args.folder, 'out')):
-            cfg_path = os.path.join(root, 'gate.cfg')
-            if os.path.exists(cfg_path):
-                ellipse1, ellipse2, circle, rows, cols = read_gate_config(cfg_path)
+            pd_path = os.path.join(root, 'nuclei.pandas')
+            if os.path.exists(pd_path):
+                cfg_path = os.path.join(root, 'gate.cfg')
+                if os.path.exists(cfg_path):
+                    ellipse1, ellipse2, circle, rows, cols = read_gate_config(cfg_path)
 
-                pd_path = os.path.join(root, 'nuclei.pandas')
-                df = pd.read_pickle(pd_path)
-                df["geometry"] = df.apply(
-                    lambda row: shapely.geometry.Point(row['dna_int'] / 1e6 / 6, np.log(row['edu_int'])),
-                    axis=1)
+                    pd_path = os.path.join(root, 'nuclei.pandas')
+                    df = pd.read_pickle(pd_path)
+                    df["geometry"] = df.apply(
+                        lambda row: shapely.geometry.Point(row['dna_int'] / 1e6 / 6, np.log(row['edu_int'])),
+                        axis=1)
 
-                den = DraggableEightNote(ax, ellipse1, ellipse2, circle, number_of_sphase_segments=4)
-                write_gate_config(cfg_path, df, ellipse1, ellipse2, circle)
-                df = gate(df, den)
+                    den = DraggableEightNote(ax, ellipse1, ellipse2, circle, number_of_sphase_segments=4)
+                    write_gate_config(cfg_path, df, ellipse1, ellipse2, circle)
+                    df = gate(df, den)
 
-                render_path = o.ensure_dir(os.path.join(args.folder, 'render'))
-                for ix, dfg in df.groupby("cluster"):
-                    _path = os.path.join(root, 'render', str(int(ix)))
-                    dest_path = o.ensure_dir(_path)
+                    render_path = o.ensure_dir(os.path.join(args.folder, 'render'))
+                    for ix, dfg in df.groupby("cluster"):
+                        _path = os.path.join(root, 'render', str(int(ix)))
+                        dest_path = o.ensure_dir(_path)
 
-                    move_images(dfg, render_path=render_path, destination_folder=dest_path)
+                        move_images(dfg, render_path=render_path, destination_folder=dest_path)
             else:
 
                 for dir in directories:
