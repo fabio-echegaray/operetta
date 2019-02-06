@@ -135,23 +135,23 @@ class FourChannels(Montage):
             c1 = shapely.wkt.loads(smp['c1'].values[0]) if smp['c1'].values[0] is not None else None
             c2 = shapely.wkt.loads(smp['c2'].values[0]) if smp['c2'].values[0] is not None else None
             p.render_cell(nucleus, cell, [c1, c2], ax=axg)
+            axg.text(cell.centroid.x + 2, cell.centroid.y - 1, ix, color='yellow')
 
             # render and save closeup image
             axc.cla()
             axc.plot(frx, fry, color='red', linewidth=2, solid_capstyle='round', zorder=1)
             p.render_cell(nucleus, cell, [c1, c2], ax=axc)
-            w, h = hoechst_raw.shape
-            axc.imshow(out, extent=[0, w / self.pix_per_um, h / self.pix_per_um, 0])
+            w_um, h_um = [s * self.um_per_pix for s in hoechst_raw.shape]
+            axc.imshow(out, extent=[0, w_um, h_um, 0])
+
             minx, miny, maxx, maxy = cell.bounds
-            w, h = maxx - minx, maxy - miny
-            axc.set_xlim(cell.centroid.x - w / 2, cell.centroid.x + w / 2)
-            axc.set_ylim(cell.centroid.y - h / 2, cell.centroid.y + h / 2)
-            x0, xf = cell.centroid.x - w / 2, cell.centroid.x + w / 2
-            y0, yf = cell.centroid.y - h / 2, cell.centroid.y + h / 2
+            w_um, h_um = maxx - minx, maxy - miny
+            x0, xf = cell.centroid.x - w_um / 2, cell.centroid.x + w_um / 2
+            y0, yf = cell.centroid.y - h_um / 2, cell.centroid.y + h_um / 2
             axc.set_xlim(x0, xf)
             axc.set_ylim(y0, yf)
             axc.plot([x0, x0 + 10], [y0 + 0.5, y0 + 0.5], c='w', lw=4)
-            axc.text(x0 + 1, y0 + 0.6 * self.pix_per_um, '10 um', color='w')
+            axc.text(x0 + 1, y0 + 0.6, '10 um', color='w')
             if "cluster" in smp:
                 axc.text(nucleus.centroid.x, nucleus.centroid.y, smp["cluster"], color='w', zorder=10)
 
@@ -163,28 +163,21 @@ class FourChannels(Montage):
         axg.plot([5, 5 + 10], [5, 5], c='w', lw=4)
         axg.text(5 + 1, 5 + 1.5, '10 um', color='w')
 
-        w, h = hoechst_raw.shape
-        axg.imshow(out, extent=[0, w / self.pix_per_um, h / self.pix_per_um, 0])
-        axg.set_xlim([0, w / self.pix_per_um])
-        axg.set_ylim([0, h / self.pix_per_um])
-        axg.set_axis_off()
+        w_um, h_um = hoechst_raw.shape
+        axg.imshow(out, extent=[0, w_um / self.pix_per_um, h_um / self.pix_per_um, 0])
+        axg.set_xlim([0, w_um / self.pix_per_um])
+        axg.set_ylim([0, h_um / self.pix_per_um])
+        axg.set_axis_on()
         fig_general.tight_layout()
         pil = canvas_to_pil(canvas_g)
         name = 'r%d-c%d-f%d.jpg' % (row, col, fid)
         fpath = os.path.abspath(os.path.join(basepath, name))
         pil.save(ensure_dir(fpath))
 
-    def is_valid_sample(self, width, height, cell_polygon, nuclei_polygon, nuclei_list=None):
+    def is_valid_sample(self, frame_polygon, cell_polygon, nuclei_polygon, nuclei_list=None):
         # check that neither nucleus or cell boundary touch the ends of the frame
-        frame = Polygon([(0, 0), (0, width), (height, width), (height, 0)])
 
-        nuclei_polygon = affinity.scale(nuclei_polygon, xfact=self.pix_per_um, yfact=self.pix_per_um, origin=(0, 0, 0))
-        cell_polygon = affinity.scale(cell_polygon, xfact=self.pix_per_um, yfact=self.pix_per_um, origin=(0, 0, 0))
-
-        # instead of using DE-9IM predicates, use a more robust strategy
-        # see https://github.com/Toblerity/Shapely/issues/346
-        EPS = 1e-15
-        if frame.distance(cell_polygon) < EPS or frame.distance(nuclei_polygon) < EPS:
+        if np.any(np.abs(np.array(cell_polygon.bounds) - np.array(frame_polygon.bounds)) <= 2):
             return False, FourChannels.REJECTION_TOUCHING_FRAME
         if not cell_polygon.contains(nuclei_polygon):
             return False, FourChannels.REJECTION_NO_NUCLEUS
@@ -192,9 +185,8 @@ class FourChannels(Montage):
         # make sure that there's only one nucleus inside cell
         if nuclei_list is not None:
             n_nuc = 0
-            for ncl in nuclei_list:
-                nuc = affinity.scale(ncl['boundary'], xfact=self.pix_per_um, yfact=self.pix_per_um, origin=(0, 0, 0))
-                if cell_polygon.contains(nuc):
+            for nuc in nuclei_list:
+                if cell_polygon.contains(nuc['boundary']):
                     n_nuc += 1
             if n_nuc > 1:
                 return False, FourChannels.REJECTION_TWO_NUCLEI
@@ -240,6 +232,8 @@ class FourChannels(Montage):
         r = 10  # [um]
         pix_per_um = self.pix_per_um
 
+        # NOTE: all the extraction process and validation is done in the pixel space
+
         # --------------------
         #     Find nuclei
         # --------------------
@@ -262,7 +256,9 @@ class FourChannels(Montage):
         logger.debug("%d cells found in image" % len(cells))
 
         df = pd.DataFrame()
-        w, h = tubulin.shape
+        width, height = tubulin.shape
+        frame = Polygon([(0, 0), (0, height), (width, height), (width, 0)])
+        # frame = affinity.scale(frame, xfact=self.um_per_pix, yfact=self.um_per_pix, origin=(0, 0, 0))
         touching_fr = too_big = no_nuclei = two_nuclei = 0
         # iterate through all cells
         for cl in cells:
@@ -272,7 +268,7 @@ class FourChannels(Montage):
                 nucl_bnd = nucleus['boundary']
                 x0, y0, xf, yf = [int(u) for u in nucleus['boundary'].bounds]
 
-                valid_sample, reason = self.is_valid_sample(w, h, cell_bnd, nucl_bnd, nuclei)
+                valid_sample, reason = self.is_valid_sample(frame, cell_bnd, nucl_bnd, nuclei)
                 if reason == FourChannels.REJECTION_TOUCHING_FRAME: touching_fr += 1
                 if reason == FourChannels.REJECTION_NO_NUCLEUS: no_nuclei += 1
                 if reason == FourChannels.REJECTION_TWO_NUCLEI: two_nuclei += 1
@@ -310,6 +306,7 @@ class FourChannels(Montage):
                     edu_int = m.integral_over_surface(edu, nucl_bnd)
                     dna_int = m.integral_over_surface(hoechst, nucl_bnd)
 
+                    # convert everything to um space for dataframe construction
                     nucl_bndum = affinity.scale(nucl_bnd, xfact=self.um_per_pix, yfact=self.um_per_pix,
                                                 origin=(0, 0, 0))
                     cell_bndum = affinity.scale(cell_bnd, xfact=self.um_per_pix, yfact=self.um_per_pix,
@@ -318,7 +315,7 @@ class FourChannels(Montage):
                     lc = 2 if c2 is not None else 1 if c1 is not None else np.nan
                     # TODO: Add units support
                     d = pd.DataFrame(data={
-                        'id': [nucleus['id']],
+                        'id': [cl['id']],
                         'dna_int': [dna_int],
                         'edu_int': [edu_int],
                         'tubulin_int': [tubulin_int],
