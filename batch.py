@@ -77,6 +77,8 @@ if __name__ == '__main__':
                         help='folder where operetta images reside')
     parser.add_argument('--render', action='store_true',
                         help='render images (in a folder called render up in the hierarchy)')
+    parser.add_argument('--image', action='store_true',
+                        help='retrieve image of the stack with id extracted from --id into a tiff file')
     parser.add_argument('--plot', action='store_true',
                         help='plot all graphs')
     parser.add_argument('--measure', action='store_true',
@@ -84,7 +86,7 @@ if __name__ == '__main__':
     parser.add_argument('--generate', action='store_true',
                         help='creates a csv file with every image in the image folder')
     parser.add_argument('--id', type=int,
-                        help='measure an image of the stack with id into a csv file')
+                        help='select an image of the stack with specified ID')
     parser.add_argument('--collect', action='store_true',
                         help='collect measurements from csv format to pandas dataframe')
     args = parser.parse_args()
@@ -113,13 +115,26 @@ if __name__ == '__main__':
 
     if args.id:
         import operetta as o
+        import numpy as np
 
         operetta = o.FourChannels(args.folder)
-        df = operetta.measure(args.id)
 
         if args.render:
+            df = operetta.measure(args.id)
             operetta.samples = df
             operetta.save_render(args.id, max_width=300)
+
+        if args.image:
+            from skimage.external.tifffile import imsave
+
+            logger.info('------------------------- IMAGE -------------------------')
+            image = operetta.max_projection(args.id)
+            imsave('%d.tiff' % args.id, np.array(image))
+
+            # if hasattr(operetta, 'flatfield_profiles'):
+            #     for plane in ['Background', 'Foreground']:
+            #         ffp = [p[plane]['Profile']['Image'] for p in operetta.flatfield_profiles]
+            #         imsave('ffp-%s.tiff' % plane.lower(), np.array(ffp))
 
     if args.collect and not args.id:
         import pandas as pd
