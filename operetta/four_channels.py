@@ -95,18 +95,14 @@ class FourChannels(Montage):
         pericentrin = color.gray2rgb(pericentrin_gray)
         # edu = color.gray2rgb(edu_gray)
 
-        alexa_488 = [.29, 1., 0]
-        alexa_594 = [1., .61, 0]
-        alexa_647 = [.83, .28, .28]
-        hoechst_33342 = [0, .57, 1.]
         # out = hoechst * hoechst_33342 * 0.25 + \
         #       tubulin * alexa_488 * 0.25 + \
         #       pericentrin * alexa_594 * 0.25 + \
         #       edu * alexa_647 * 0.25
 
         # out = hoechst * hoechst_33342 * 0.4 + tubulin * alexa_488 * 0.4
-        out = hoechst * hoechst_33342 * 0.5 + pericentrin * alexa_594 * 0.5
-        # out = pericentrin * alexa_594
+        # out = hoechst * hoechst_33342 * 0.5 + pericentrin * alexa_594 * 0.5
+        out = pericentrin * p.colors.alexa_594
 
         fig_general = Figure((max_width * 4 / 150, max_width * 4 / 150), dpi=150)
         canvas_g = FigureCanvas(fig_general)
