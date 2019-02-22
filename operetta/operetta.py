@@ -194,7 +194,7 @@ class Montage:
                                 z = n + z
                             profile[plane]['Profile']['Image'] = z
 
-        logger.info("flat field correction calculated from coefficients")
+        logger.info("flat field correction calculated from coefficients.")
 
     def _flat_field_correct(self, img, channel):
         if self.flatfield_profiles is not None:

@@ -29,6 +29,7 @@ class FourChannels(Montage):
         try:
             super().__init__(base_path, row=row, col=col, condition_name=condition_name)
         except ImagesFolderNotFound:
+            logger.warning("no images folder found.")
             self.images_path = os.path.join(base_path, 'Images')
 
         pd_path = os.path.join(base_path, 'out', 'nuclei.pandas')

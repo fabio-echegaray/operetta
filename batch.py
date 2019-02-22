@@ -10,8 +10,8 @@ from pandas.errors import EmptyDataError
 import operetta as o
 from exceptions import BadParameterError
 
-logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger('batch')
+logger.setLevel(logging.DEBUG)
 logging.getLogger('matplotlib').setLevel(logging.ERROR)
 logging.getLogger('shapely').setLevel(logging.ERROR)
 warnings.simplefilter(action='ignore', category=FutureWarning)
