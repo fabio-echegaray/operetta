@@ -53,8 +53,8 @@ class FourChannels(Montage):
         return True
 
     @staticmethod
-    def filename_of_render(row, basepath):
-        name = 'r%d-c%d-f%d-i%d.jpg' % (row['row'], row['col'], row['fid'], row['id'])
+    def filename_of_render(row, basepath, ext='jpg'):
+        name = 'r%d-c%d-i%d.%s' % (row['row'], row['col'], row['fid'], ext)
         if os.path.basename(basepath) == 'render':
             path = os.path.abspath(os.path.join(basepath, name))
         else:
@@ -120,6 +120,7 @@ class FourChannels(Montage):
 
         s = self.samples
         dfi = s[(s['row'] == row) & (s['col'] == col) & (s['fid'] == fid)]
+        assert len(dfi) == 1, 'more than one sample'
         axg.cla()
         width, height = hoechst_raw.shape
         frame = Polygon([(0, 0), (0, width), (height, width), (height, 0)])

@@ -93,7 +93,6 @@ if __name__ == '__main__':
 
     """
         MAKE SURE YOU DON'T FORGET TO CALL
-        # virtualenv --python=/mnt/pactsw/python/2.7.12/bin/python ~/py27
         module load python/intel/3.6.039
         source ~/py36/bin/activate
     """
@@ -159,6 +158,20 @@ if __name__ == '__main__':
         logger.info('------------------------- MEASURING -------------------------')
         logger.debug(args.folder)
         batch_process_operetta_folder(args.folder)
+
+    if args.image and not args.id:
+        import operetta as o
+        import numpy as np
+        from skimage.external.tifffile import imsave
+
+        operetta = o.FourChannels(args.folder)
+        for row, col, fid in operetta.stack_generator():
+            image = operetta.max_projection(row, col, fid)
+            name = 'r%d-c%d-i%d.tiff' % (row, col, fid)
+            l = operetta.layout[(operetta.layout['row'] == row) & (operetta.layout['col'] == col)]
+            _folder = '%s%d - %s' % (l['Cell Type'].values[0], l['Cell Count'].values[0] * 10, l['Compound'].values[0])
+            destination_path = o.ensure_dir(os.path.join(operetta.render_path, _folder, name))
+            imsave(destination_path, np.array(image))
 
     if args.render and not args.id:
         import operetta as o

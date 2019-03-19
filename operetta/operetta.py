@@ -27,6 +27,9 @@ class Montage:
         self.assay_layout_path = os.path.join(folder, 'Assaylayout')
         self.ffc_path = os.path.join(folder, 'FFC_Profile')
 
+        ensure_dir(os.path.join(folder, 'out', 'render', 'nil'))
+        self.render_path = os.path.join(folder, 'out', 'render')
+
         self.name = condition_name
 
         csv_path = os.path.join(folder, 'out', 'operetta.csv')
@@ -49,10 +52,9 @@ class Montage:
             logger.debug('columns: %s' % f['col'].unique())
         self.files_gr = self.files.groupby(['row', 'col', 'fid']).size().reset_index()
 
-        self.um_per_pix = convert_to(1.8983367649421008E-07 * meter / pix, um / pix).n()
-        self.pix_per_um = 1 / self.um_per_pix
-        self.pix_per_um = float(self.pix_per_um.args[0])
-        self.um_per_pix = float(self.um_per_pix.args[0])
+        self.um_per_pix = None
+        self.pix_per_um = None
+        self._layout = None
 
         self.flatfield_profiles = None
         if os.path.exists(self.ffc_path):
@@ -64,8 +66,7 @@ class Montage:
     @staticmethod
     def filename(row):
         if row.index.size > 1: raise Exception('only 1 row accepted.')
-        return 'r%02dc%02df%02dp%02d-ch%dsk%dfk%dfl%d.tiff' % tuple(
-            row[['row', 'col', 'fid', 'p', 'ch', 'sk', 'fk', 'fl']].values.tolist()[0])
+        return row['filename'].values[0]
 
     @property
     def rows(self):
@@ -107,6 +108,12 @@ class Montage:
 
     def _max_projection_row_col_fid(self, row, col, f):
         group = self.files[(self.files['row'] == row) & (self.files['col'] == col) & (self.files['fid'] == f)]
+        um_per_pix = group['um_per_pix'].unique()
+        pix_per_um = group['pix_per_um'].unique()
+        assert len(um_per_pix) == 1 and len(pix_per_um) == 1, 'different resolutions for projection'
+        self.um_per_pix = um_per_pix[0]
+        self.pix_per_um = pix_per_um[0]
+
         channels = list()
         for ic, c in group.groupby('ch'):  # iterate over channels
             files = list()
@@ -121,7 +128,7 @@ class Montage:
                     img = io.imread(fname)
                     max = np.maximum(max, img)
 
-                channels.append(self._flat_field_correct(max, ic))
+                channels.append(max)
             except Exception as e:
                 logger.error(e)
 
@@ -136,21 +143,67 @@ class Montage:
 
     @staticmethod
     def generate_images_structure(base_folder):
-        #  build a list of dicts for every image file in the directory
-        l = list()
         images_path = os.path.join(base_folder, 'Images')
-        for root, directories, filenames in os.walk(images_path):
+        ns = {'d': 'http://www.perkinelmer.com/PEHH/HarmonyV5'}
+        e = xml.etree.ElementTree.parse(os.path.join(images_path, 'Index.idx.xml')).getroot()
+        ims = e.find('d:Images', ns).findall('d:Image', ns)
+        list_of_dicts_of_img = [{x.tag.replace('{%s}' % ns['d'], ''): x.text for x in im} for im in ims]
+        f = (
+            pd.DataFrame(list_of_dicts_of_img)
+                .rename(index=str,
+                        columns={"Row": "row", "Col": "col", "FieldID": "fid", "PlaneID": "p", "TimepointID": "tid",
+                                 "ChannelID": "ch", "FlimID": "fl", "URL": "filename", })
+                .drop(['AbsPositionZ', 'AbsTime', 'AcquisitionType', 'BinningX', 'BinningY', 'CameraType',
+                       'ChannelType', 'ExposureTime', 'IlluminationType', 'ImageSizeX', 'ImageSizeY', 'ImageType',
+                       'MainEmissionWavelength', 'MainExcitationWavelength', 'MaxIntensity', 'MeasurementTimeOffset',
+                       'OrientationMatrix', 'PositionX', 'PositionY', 'PositionZ', 'State'], axis=1)
+        )
+
+        assert (f['ImageResolutionX'] == f['ImageResolutionY']).all(), 'some pixels are not square'
+
+        f.loc[:, 'ImageResolutionX'] = f['ImageResolutionX'].apply(pd.to_numeric, errors='ignore')
+        f.loc[:, 'um_per_pix'] = f['ImageResolutionX'].apply(
+            lambda rx: convert_to(rx * meter / pix, um / pix).n().args[0])
+        f.loc[:, 'pix_per_um'] = 1 / f['um_per_pix']
+        f.drop(['ImageResolutionX', 'ImageResolutionY'], axis=1, inplace=True)
+        return f[['row', 'col', 'fid', 'p', 'ch', 'tid', 'fl', 'ChannelName', 'um_per_pix', 'pix_per_um',
+                  'ObjectiveMagnification', 'ObjectiveNA', 'filename', 'id', ]]
+
+    @property
+    def layout(self):
+        """ Locates the assay layout xml file in the folder structure, and constructs a pandas dataframe from it. """
+        if self._layout is not None: return self._layout
+
+        _xmld = "{http://www.perkinelmer.com/PEHH/HarmonyV5}"
+        ns = {'d': 'http://www.perkinelmer.com/PEHH/HarmonyV5'}
+        for root, directories, filenames in os.walk(self.assay_layout_path):
             for filename in filenames:
                 ext = filename.split('.')[-1]
-                if ext == 'tiff':
-                    _row, _col, f, p, ch, sk, fk, fl = [int(g) for g in re.search(
-                        'r([0-9]+)c([0-9]+)f([0-9]+)p([0-9]+)-ch([0-9]+)sk([0-9]+)fk([0-9]+)fl([0-9]+).tiff',
-                        filename).groups()]
-                    i = {'row': _row, 'col': _col, 'fid': f, 'p': p, 'ch': ch, 'sk': sk, 'fk': fk, 'fl': fl}
-                    l.append(i)
-        f = pd.DataFrame(l)
+                if ext == 'xml':
+                    e = xml.etree.ElementTree.parse(os.path.join(root, filename)).getroot()
 
-        return f
+                    cols = int(e.find('d:PlateCols', ns).text)
+                    rows = int(e.find('d:PlateRows', ns).text)
+                    df = (  # this creates cartesian product of cols & rows
+                        pd.DataFrame({'row': range(1, rows + 1)}).assign(key=1)
+                            .merge(pd.DataFrame({'col': range(1, cols + 1)}).assign(key=1), on='key')
+                            .drop('key', axis=1)
+                    )
+
+                    for ly in e.findall('d:Layer', ns):
+                        ly_name = ly.find('d:Name', ns).text
+                        # ly_type = ly.find('d:ValueType', ns).text
+                        for w in ly.findall('d:Well', ns):
+                            row = int(w.find('d:Row', ns).text)
+                            col = int(w.find('d:Col', ns).text)
+                            val = w.find('d:Value', ns).text
+                            df.loc[(df['row'] == row) & (df['col'] == col), ly_name] = val
+
+                    self._layout = df.apply(pd.to_numeric, errors='ignore')
+                    break
+
+        logger.info("layout succesfully extracted from xml file.")
+        return self._layout
 
     def flat_field_profile(self):
         for root, directories, filenames in os.walk(self.ffc_path):
