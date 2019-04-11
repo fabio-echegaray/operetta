@@ -18,7 +18,7 @@ warnings.simplefilter(action='ignore', category=FutureWarning)
 
 
 def batch_process_operetta_folder(path):
-    operetta = o.FourChannels(path)
+    operetta = o.ConfiguredChannels(path)
     outdf = pd.DataFrame()
     for row, col, fid in operetta.stack_generator():
         try:
@@ -32,7 +32,7 @@ def batch_process_operetta_folder(path):
 
 
 def batch_render(images_path):
-    operetta = o.FourChannels(images_path)
+    operetta = o.ConfiguredChannels(images_path)
     for row, col, fid in operetta.stack_generator():
         operetta.save_render(row, col, fid, max_width=300)
 
@@ -83,8 +83,6 @@ if __name__ == '__main__':
                         help='plot all graphs')
     parser.add_argument('--measure', action='store_true',
                         help='measure_into_dataframe features on the dataset')
-    parser.add_argument('--generate', action='store_true',
-                        help='creates a csv file with every image in the image folder')
     parser.add_argument('--id', type=int,
                         help='select an image of the stack with specified ID')
     parser.add_argument('--collect', action='store_true',
@@ -100,23 +98,11 @@ if __name__ == '__main__':
     if args.measure and args.id:
         raise BadParameterError("measure and hpc modes are not allowed in the same command call")
 
-    if args.generate:
-        import operetta as o
-
-        f = o.FourChannels.generate_images_structure(args.folder)
-        op_csv = o.ensure_dir(os.path.join(args.folder, 'out', 'operetta.csv'))
-        f.to_csv(op_csv, index=False)
-
-        print("csv file generated!")
-
-        fgr = f.groupby(['row', 'col', 'fid']).size().reset_index()
-        print("%d image stacks available." % len(fgr))
-
     if args.id:
         import operetta as o
         import numpy as np
 
-        operetta = o.FourChannels(args.folder)
+        operetta = o.ConfiguredChannels(args.folder)
 
         if args.render:
             df = operetta.measure(args.id)
@@ -164,7 +150,7 @@ if __name__ == '__main__':
         import numpy as np
         from skimage.external.tifffile import imsave
 
-        operetta = o.FourChannels(args.folder)
+        operetta = o.ConfiguredChannels(args.folder)
         for row, col, fid in operetta.stack_generator():
             image = operetta.max_projection(row, col, fid)
             name = 'r%d-c%d-i%d.tiff' % (row, col, fid)

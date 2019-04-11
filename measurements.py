@@ -19,6 +19,11 @@ from shapely.geometry.polygon import Polygon
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger('hhlab')
 
+REJECTION_TOUCHING_FRAME = -1
+REJECTION_NO_NUCLEUS = -2
+REJECTION_TWO_NUCLEI = -3
+REJECTION_CELL_TOO_BIG = -4
+
 
 def eng_string(x, format='%s', si=False):
     '''
@@ -213,3 +218,29 @@ def exclude_contained(polygons):
         if p2['boundary'].contains(p1['boundary']):
             p1['valid'] = False
     return [p for p in polygons if p['valid']]
+
+
+def is_valid_sample(frame_polygon, cell_polygon, nuclei_polygon, nuclei_list=None):
+    # check that neither nucleus or cell boundary touch the ends of the frame
+
+    if np.any(np.abs(np.array(cell_polygon.bounds) - np.array(frame_polygon.bounds)) <= 2):
+        return False, REJECTION_TOUCHING_FRAME
+    if not cell_polygon.contains(nuclei_polygon):
+        return False, REJECTION_NO_NUCLEUS
+
+    # make sure that there's only one nucleus inside cell
+    if nuclei_list is not None:
+        n_nuc = 0
+        for nuc in nuclei_list:
+            if cell_polygon.contains(nuc['boundary']):
+                n_nuc += 1
+        if n_nuc > 1:
+            return False, REJECTION_TWO_NUCLEI
+
+    # nucleus area should be at least three to four times the are of the cell
+    area_ratio = cell_polygon.area / nuclei_polygon.area
+    if area_ratio > 5:
+        return False, REJECTION_CELL_TOO_BIG
+    logger.debug('sample accepted with an area ratio of %0.2f' % area_ratio)
+
+    return True, None

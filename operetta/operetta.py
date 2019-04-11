@@ -16,7 +16,7 @@ def ensure_dir(file_path):
     file_path = os.path.abspath(file_path)
     directory = os.path.dirname(file_path)
     if not os.path.exists(directory):
-        os.makedirs(directory)
+        os.makedirs(directory, exist_ok=True)
     return file_path
 
 
@@ -34,22 +34,26 @@ class Montage:
 
         csv_path = os.path.join(folder, 'out', 'operetta.csv')
         if not os.path.exists(csv_path):
-            raise FileNotFoundError(
-                'File operetta.csv is missing in the folder structure. Generate the csv file first.')
+            logger.warning('File operetta.csv is missing in the folder structure, generating it now.')
+
+            self.files = self.generate_images_structure(folder)
+            op_csv = ensure_dir(os.path.join(folder, 'out', 'operetta.csv'))
+            self.files.to_csv(op_csv, index=False)
+            fgr = self.files.groupby(['row', 'col', 'fid']).size().reset_index()
+            logger.info("%d image stacks available." % len(fgr))
         else:
-            f = pd.read_csv(csv_path)
-        self.files = f
+            self.files = pd.read_csv(csv_path)
 
         if row is not None:
             logger.debug('original rows: %s' % self.rows())
             logger.debug('restricting rows to %s' % row)
-            f = f[f['row'] == row]
-            logger.debug('rows: %s' % f['row'].unique())
+            self.files = self.files[self.files['row'] == row]
+            logger.debug('rows: %s' % self.files['row'].unique())
         if col is not None:
             logger.debug('original columns: %s' % self.columns())
             logger.debug('restricting columns to %s' % col)
-            f = f[f['col'] == col]
-            logger.debug('columns: %s' % f['col'].unique())
+            self.files = self.files[self.files['col'] == col]
+            logger.debug('columns: %s' % self.files['col'].unique())
         self.files_gr = self.files.groupby(['row', 'col', 'fid']).size().reset_index()
 
         self.um_per_pix = None
@@ -65,7 +69,7 @@ class Montage:
 
     @staticmethod
     def filename(row):
-        if row.index.size > 1: raise Exception('only 1 row accepted.')
+        assert row.index.size == 1, 'only 1 row accepted'
         return row['filename'].values[0]
 
     @property
@@ -87,7 +91,6 @@ class Montage:
     def stack_generator(self):
         l = len(self.files_gr)
         for ig, g in self.files_gr.iterrows():
-            # if not (row == 1 and col == 9 and fid == 72): continue
             logger.info('stack generator:  %d of %d - row=%d col=%d fid=%d' % (ig + 1, l, g['row'], g['col'], g['fid']))
             yield g['row'], g['col'], g['fid']
 
@@ -132,6 +135,7 @@ class Montage:
             except Exception as e:
                 logger.error(e)
 
+        assert len(channels) > 0, 'no images out of max projection'
         return channels
 
     def measure(self, row, col, f):
