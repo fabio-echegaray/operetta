@@ -2,6 +2,7 @@ import matplotlib.pyplot as plt
 import shapely.geometry
 from matplotlib.ticker import EngFormatter
 import numpy as np
+import matplotlib.colors as mcolors
 
 
 class colors():
@@ -9,24 +10,27 @@ class colors():
     alexa_594 = [1., .61, 0]
     alexa_647 = [.83, .28, .28]
     hoechst_33342 = [0, .57, 1.]
-    sussex_flint = '#013035'
-    sussex_cobalt_blue = '#1e428a'
-    sussex_mid_grey = '#94a596'
-    sussex_fuschia_pink = '#eb6bb0'
-    sussex_coral_red = '#df465a'
-    sussex_turquoise = '#00afaa'
-    sussex_warm_grey = '#d6d2c4'
-    sussex_sunshine_yellow = '#ffb81c'
-    sussex_burnt_orange = '#dc582a'
-    sussex_sky_blue = '#40b4e5'
+    red = [1, 0, 0]
+    green = [0, 1, 0]
+    blue = [0, 0, 1]
+    sussex_flint = mcolors.to_rgb('#013035')
+    sussex_cobalt_blue = mcolors.to_rgb('#1e428a')
+    sussex_mid_grey = mcolors.to_rgb('#94a596')
+    sussex_fuschia_pink = mcolors.to_rgb('#eb6bb0')
+    sussex_coral_red = mcolors.to_rgb('#df465a')
+    sussex_turquoise = mcolors.to_rgb('#00afaa')
+    sussex_warm_grey = mcolors.to_rgb('#d6d2c4')
+    sussex_sunshine_yellow = mcolors.to_rgb('#ffb81c')
+    sussex_burnt_orange = mcolors.to_rgb('#dc582a')
+    sussex_sky_blue = mcolors.to_rgb('#40b4e5')
 
-    sussex_navy_blue = '#1b365d'
-    sussex_china_rose = '#c284a3'
-    sussex_powder_blue = '#7da1c4'
-    sussex_grape = '#5d3754'
-    sussex_corn_yellow = '#f2c75c'
-    sussex_cool_grey = '#d0d3d4'
-    sussex_deep_aquamarine = '#487a7b'
+    sussex_navy_blue = mcolors.to_rgb('#1b365d')
+    sussex_china_rose = mcolors.to_rgb('#c284a3')
+    sussex_powder_blue = mcolors.to_rgb('#7da1c4')
+    sussex_grape = mcolors.to_rgb('#5d3754')
+    sussex_corn_yellow = mcolors.to_rgb('#f2c75c')
+    sussex_cool_grey = mcolors.to_rgb('#d0d3d4')
+    sussex_deep_aquamarine = mcolors.to_rgb('#487a7b')
 
 
 def facs(df, ax=None, xlim=[1, 8], ylim=[12, 18.5], color=None):
