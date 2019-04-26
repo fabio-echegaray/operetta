@@ -24,7 +24,7 @@ pd.set_option('display.width', 320)
 def move_images(df, render_path, destination_folder):
     os.makedirs(destination_folder, exist_ok=True)
     for i, r in df.iterrows():
-        name, original_path = o.FourChannels.filename_of_render(r, render_path)
+        name, original_path = o.ConfiguredChannels.filename_of_render(r, render_path)
         destination_path = os.path.join(destination_folder, name)
         try:
             logger.info('moving %s to %s' % (name, destination_folder))
@@ -136,7 +136,7 @@ def gate(df, den):
 
 def apply_gate_to_folder(pd_path, out_path):
     df = pd.read_pickle(pd_path)
-    df = df[df.apply(o.FourChannels.is_valid_measured_row, axis=1)]
+    df = df[df.apply(is_valid_measured_row, axis=1)]
     # print(df.groupby(['fid', 'row', 'col', 'id']).size())
     # print(len(df.groupby(['fid', 'row', 'col', 'id']).size()))
 
@@ -204,6 +204,17 @@ def apply_gate_to_folder(pd_path, out_path):
     # g = sns.FacetGrid(dfg, row="cluster", row_order=rorder, col="variable", height=1.5, aspect=3)
     # g = g.map_dataframe(_distplot, "value", rug=True)
     # g.savefig('{:s}/distribution-across-cc.pdf'.format(out_path))
+
+
+def is_valid_measured_row(row):
+    if row['cell'] is None: return False
+    if row['centrosomes'] < 1: return False
+    if row['tubulin_dens'] < 150: return False
+    if np.isnan(row['c1_int']): return False
+    if row['c2_int'] / row['c1_int'] < 0.6: return False
+    if shapely.wkt.loads(row['nucleus']).area < 5 ** 2 * np.pi: return False
+
+    return True
 
 
 if __name__ == '__main__':

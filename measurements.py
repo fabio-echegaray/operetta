@@ -212,7 +212,7 @@ def exclude_contained(polygons):
     for p in polygons:
         p['valid'] = True
     for p1, p2 in itertools.combinations(polygons, 2):
-        if not p['valid'] or not p['valid']: continue
+        if not p1['valid'] or not p2['valid']: continue
         if p1['boundary'].contains(p2['boundary']):
             p2['valid'] = False
         if p2['boundary'].contains(p1['boundary']):

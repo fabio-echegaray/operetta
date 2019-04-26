@@ -190,7 +190,7 @@ class ConfiguredChannels(Montage):
 
         for ix, smp in dfi.groupby('id'):
             nucleus = shapely.wkt.loads(smp['nucleus'].iloc[0])
-            cell = shapely.wkt.loads(smp['cell'].iloc[0]) if not smp['cell'].isna().iloc[0] else None
+            cell = shapely.wkt.loads(smp['cell'].iloc[0]) if 'cell' in smp and not smp['cell'].isna().iloc[0] else None
 
             c1 = shapely.wkt.loads(smp['c1'].iloc[0]) if not smp['c1'].isna().iloc[0] else None
             c2 = shapely.wkt.loads(smp['c2'].iloc[0]) if not smp['c2'].isna().iloc[0] else None
@@ -218,7 +218,7 @@ class ConfiguredChannels(Montage):
         axc = fig_closeup.gca()
         for ix, smp in dfi.groupby('id'):
             nucleus = shapely.wkt.loads(smp['nucleus'].values[0])
-            cell = shapely.wkt.loads(smp['cell'].iloc[0]) if not smp['cell'].isna().iloc[0] else None
+            cell = shapely.wkt.loads(smp['cell'].iloc[0]) if 'cell' in smp and not smp['cell'].isna().iloc[0] else None
 
             c1 = shapely.wkt.loads(smp['c1'].iloc[0]) if not smp['c1'].isna().iloc[0] else None
             c2 = shapely.wkt.loads(smp['c2'].iloc[0]) if not smp['c2'].isna().iloc[0] else None
@@ -245,7 +245,7 @@ class ConfiguredChannels(Montage):
 
     def measure(self, *args):
         if len(args) == 1 and isinstance(args[0], int):
-            _id = args[0]
+            _id = int(args[0])
             r = self.files_gr.ix[_id - 1]
             row, col, fid = r['row'], r['col'], r['fid']
             logger.debug('measuring id=%d row=%d col=%d fid=%d' % (_id, row, col, fid))
@@ -344,7 +344,7 @@ class ConfiguredChannels(Montage):
                     if valid_sample:
                         tubulin_int = m.integral_over_surface(cell_img, cell_bnd)
                         tub_density = tubulin_int / cell_bnd.area
-                        if tub_density < 250:
+                        if tub_density < 150:
                             logger.warning(
                                 "sample rejected after validation because it had a low tubulin density")
                             logger.debug('tubulin density in cell: %0.2f, intensity %0.2f, area %0.2f' % (
@@ -440,7 +440,6 @@ class ConfiguredChannels(Montage):
                         cntrsmes = sorted(cntrsmes, key=lambda ki: ki['i'], reverse=True)
 
                     logger.debug('found {:d} centrosomes'.format(len(cntrsmes)))
-                    if len(cntrsmes) == 0: continue
 
                     twocntr = len(cntrsmes) >= 2
                     c1 = cntrsmes[0] if len(cntrsmes) > 0 else None
@@ -474,8 +473,8 @@ class ConfiguredChannels(Montage):
                 logger.debug('computing std dev of background for SNR calculation')
                 std_pericentrin = np.std(_img[cells_mask])
                 # u_pericentrin = np.mean(_img[cells_mask])
-                df['snr_c1'] = df['c1_int'] / std_pericentrin
-                df['snr_c2'] = df['c2_int'] / std_pericentrin
+                df['snr_c1'] = df['c1_int'].apply(lambda i: i / std_pericentrin if not np.isnan(i) else np.nan)
+                df['snr_c2'] = df['c2_int'].apply(lambda i: i / std_pericentrin if not np.isnan(i) else np.nan)
 
         if len(df) > 0:
             df['fid'] = fid

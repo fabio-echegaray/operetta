@@ -135,6 +135,7 @@ if __name__ == '__main__':
                         cnd_path = o.ensure_dir(os.path.join(root, name, 'nuclei.pandas'))
                         pd.to_pickle(cnd, cnd_path)
                 else:
+                    df = df[~df['cell'].isna()]
                     pd.to_pickle(df, os.path.join(root, 'nuclei.pandas'))
 
     if args.measure and not args.id:

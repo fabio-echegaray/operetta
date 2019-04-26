@@ -39,8 +39,6 @@ class Montage:
             self.files = self.generate_images_structure(folder)
             op_csv = ensure_dir(os.path.join(folder, 'out', 'operetta.csv'))
             self.files.to_csv(op_csv, index=False)
-            fgr = self.files.groupby(['row', 'col', 'fid']).size().reset_index()
-            logger.info("%d image stacks available." % len(fgr))
         else:
             self.files = pd.read_csv(csv_path)
 
@@ -55,6 +53,7 @@ class Montage:
             self.files = self.files[self.files['col'] == col]
             logger.debug('columns: %s' % self.files['col'].unique())
         self.files_gr = self.files.groupby(['row', 'col', 'fid']).size().reset_index()
+        logger.info("%d image stacks available." % len(self.files_gr))
 
         self.um_per_pix = None
         self.pix_per_um = None
@@ -64,7 +63,10 @@ class Montage:
         if os.path.exists(self.ffc_path):
             self.flat_field_profile()
 
-        if not os.path.exists(self.images_path):
+        if os.path.exists(self.images_path):
+            # generate sample image
+            self._generate_sample_image()
+        else:
             raise ImagesFolderNotFound('Images folder is not in the structure.')
 
     @staticmethod
@@ -208,6 +210,35 @@ class Montage:
 
         logger.info("layout succesfully extracted from xml file.")
         return self._layout
+
+    def _generate_sample_image(self):
+        from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
+        from matplotlib.figure import Figure
+        from gui.utils import canvas_to_pil
+
+        cfg_ch = self.files.groupby(['ch', 'ChannelName']).size().reset_index().drop(0, axis=1)
+        max_ch = cfg_ch['ch'].max()
+        images = self.max_projection(np.random.randint(len(self.files_gr)))
+
+        width, height = images[0].shape
+        w_um, h_um = [s * self.um_per_pix for s in images[0].shape]
+        fig = Figure((width * 4 / 150, width * 4 / 150), dpi=150)
+        canvas_g = FigureCanvas(fig)
+
+        for i in range(4):
+            images = self.max_projection(np.random.randint(len(self.files_gr)))
+            for im, ch, title in zip(images, cfg_ch['ch'], cfg_ch['ChannelName']):
+                sp=i * 4 + ch
+                ax = fig.add_subplot(max_ch, 4, sp)
+                ax.imshow(im, extent=[0, w_um, h_um, 0], cmap='gray')
+                ax.set_xlim([0, w_um])
+                ax.set_ylim([0, h_um])
+                ax.set_axis_off()
+                ax.set_title(title)
+
+        pil = canvas_to_pil(canvas_g)
+        fpath = os.path.abspath(os.path.join(self.base_path, 'out', 'sample.jpg'))
+        pil.save(ensure_dir(fpath))
 
     def flat_field_profile(self):
         for root, directories, filenames in os.walk(self.ffc_path):
