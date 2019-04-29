@@ -64,8 +64,10 @@ class Montage:
             self.flat_field_profile()
 
         if os.path.exists(self.images_path):
-            # generate sample image
-            self._generate_sample_image()
+            try:
+                self._generate_sample_image()
+            except Exception as e:
+                logger.error(e)
         else:
             raise ImagesFolderNotFound('Images folder is not in the structure.')
 
@@ -180,6 +182,7 @@ class Montage:
         """ Locates the assay layout xml file in the folder structure, and constructs a pandas dataframe from it. """
         if self._layout is not None: return self._layout
 
+
         _xmld = "{http://www.perkinelmer.com/PEHH/HarmonyV5}"
         ns = {'d': 'http://www.perkinelmer.com/PEHH/HarmonyV5'}
         for root, directories, filenames in os.walk(self.assay_layout_path):
@@ -228,7 +231,7 @@ class Montage:
         for i in range(4):
             images = self.max_projection(np.random.randint(len(self.files_gr)))
             for im, ch, title in zip(images, cfg_ch['ch'], cfg_ch['ChannelName']):
-                sp=i * 4 + ch
+                sp = i * 4 + ch
                 ax = fig.add_subplot(max_ch, 4, sp)
                 ax.imshow(im, extent=[0, w_um, h_um, 0], cmap='gray')
                 ax.set_xlim([0, w_um])

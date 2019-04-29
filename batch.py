@@ -106,7 +106,6 @@ if __name__ == '__main__':
 
         if args.render:
             df = operetta.measure(args.id)
-            operetta.samples = df
             operetta.save_render(args.id, max_width=300)
 
         if args.image:

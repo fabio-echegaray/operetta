@@ -30,14 +30,7 @@ class ConfiguredChannels(Montage):
             logger.warning("no images folder found.")
             self.images_path = os.path.join(base_path, 'Images')
 
-        pd_path = os.path.join(base_path, 'out', 'nuclei.pandas')
-        if os.path.exists(pd_path):
-            self.samples = pd.read_pickle(pd_path)
-            if self.samples_are_well_formed(raise_exception=True): pass
-        else:
-            logger.warning('no pandas file found.')
-            self.samples = None
-
+        self._samples = None
         self._cfg = None
 
     def samples_are_well_formed(self, raise_exception=False):
@@ -51,6 +44,17 @@ class ConfiguredChannels(Montage):
 
             return False
         return True
+
+    @property
+    def samples(self):
+        if self._samples is not None: return self._samples
+        pd_path = os.path.join(self.base_path, 'out', 'nuclei.pandas')
+        if os.path.exists(pd_path):
+            self._samples = pd.read_pickle(pd_path)
+            if self.samples_are_well_formed(raise_exception=True): pass
+        else:
+            logger.warning('no pandas file found.')
+        return self._samples
 
     @staticmethod
     def filename_of_render(row, basepath, ext='jpg'):
@@ -259,6 +263,7 @@ class ConfiguredChannels(Montage):
         df = self._measure_row_col_fid(row, col, fid)
         name = 'r%d-c%d-f%d.csv' % (row, col, fid)
         df.to_csv(self.save_path(name, subdir='pandas'), index=False)
+        if self._samples is None: self._samples = df
         return df
 
     def _measure_row_col_fid(self, row, col, fid):
