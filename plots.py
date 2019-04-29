@@ -33,11 +33,9 @@ class colors():
     sussex_deep_aquamarine = mcolors.to_rgb('#487a7b')
 
 
-def facs(df, ax=None, xlim=[1, 8], ylim=[12, 18.5], color=None):
+def facs(df, ax=None, xlim=None, ylim=None, color=None):
     if ax is None:
         ax = plt.gca()
-    df["geometry"] = df.apply(lambda row: shapely.geometry.Point(row['dna_int'] / 1e6 / 6, np.log(row['edu_int'])),
-                              axis=1)
 
     if color is not None and color in df:
         df.loc[:, color] = df[color].transform(lambda x: (x - x.mean()) / x.std())
@@ -50,8 +48,8 @@ def facs(df, ax=None, xlim=[1, 8], ylim=[12, 18.5], color=None):
     formatter = EngFormatter(unit='')
     ax.xaxis.set_major_formatter(formatter)
     ax.yaxis.set_major_formatter(formatter)
-    ax.set_xlim(xlim)
-    ax.set_ylim(ylim)
+    if xlim is not None: ax.set_xlim(xlim)
+    if ylim is not None: ax.set_ylim(ylim)
     ax.set_aspect('equal')
 
 
