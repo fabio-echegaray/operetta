@@ -1,9 +1,9 @@
 import logging
 
-from .operetta import Montage, ensure_dir
-from .three_channels import ThreeChannels
-from .four_channels import FourChannels
-from .exceptions import NoSamplesError
-
-logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger('hhlab')
+logger.setLevel(logging.DEBUG)
+
+from .operetta import Montage, ensure_dir
+from .cfg_channels import ConfiguredChannels
+from .exceptions import *
+from .gate import CellCycle

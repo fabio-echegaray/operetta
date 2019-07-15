@@ -1,10 +1,10 @@
+import itertools
 import logging
 import math
 from math import sqrt
 
 import cv2
 import numpy as np
-import pandas as pd
 import scipy.ndimage as ndi
 import skimage.draw as draw
 import skimage.exposure as exposure
@@ -14,13 +14,16 @@ import skimage.measure as measure
 import skimage.morphology as morphology
 import skimage.segmentation as segmentation
 import skimage.transform as tf
-from shapely.geometry.point import Point
 from shapely.geometry.polygon import Polygon
-from shapely import affinity, wkt
 from scipy.ndimage.morphology import distance_transform_edt
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger('hhlab')
+
+REJECTION_TOUCHING_FRAME = -1
+REJECTION_NO_NUCLEUS = -2
+REJECTION_TWO_NUCLEI = -3
+REJECTION_CELL_TOO_BIG = -4
 
 
 def eng_string(x, format='%s', si=False):
@@ -74,7 +77,7 @@ def integral_over_surface(image, polygon):
         return np.nan
 
 
-def nuclei_segmentation(image, radius=10):
+def nuclei_segmentation(image, compute_distance=False, radius=10):
     # apply threshold
     logger.debug('thresholding images')
     thresh_val = filters.threshold_otsu(image)
@@ -87,30 +90,20 @@ def nuclei_segmentation(image, radius=10):
 
     if len(cleared[cleared > 0]) == 0: return None, None
 
-    # logger.debug('computing Lapacian of Gaussian for image')
-    # image = exposure.equalize_hist(image)  # improves detection
-    # image_gray = color.rgb2gray(image)
-    # markers = np.zeros(image.shape, dtype=np.int8)
-    # points = feature.blob_log(image_gray, min_sigma=0.8 * radius, max_sigma=radius, num_sigma=10, threshold=.1)
-    # # points = feature.blob_dog(image_gray, min_sigma=0.5 * radius, max_sigma=radius, threshold=1.0)
-    # print(points)
-    # if len(points) == 0:
-    #     logger.info('no nuclei found for current stack')
-    #     return None, None
-    # for k, (r, c, sg) in enumerate(points, start=1):
-    #     markers[int(r), int(c)] = k
+    if compute_distance:
+        distance = distance_transform_edt(cleared)
+        local_maxi = feature.peak_local_max(distance, indices=False, labels=cleared,
+                                            min_distance=radius / 4, exclude_border=False)
+        markers, num_features = ndi.label(local_maxi)
+        if num_features == 0:
+            logger.info('no nuclei found for current stack')
+            return None, None
 
-    distance = distance_transform_edt(cleared)
-    local_maxi = feature.peak_local_max(distance, indices=False, labels=cleared,
-                                        min_distance=radius / 4, exclude_border=False)
-    markers, num_features = ndi.label(local_maxi)
-    if num_features == 0:
-        logger.info('no nuclei found for current stack')
-        return None, None
+        labels = morphology.watershed(-distance, markers, watershed_line=True, mask=cleared)
+    else:
+        labels = cleared
 
-    labels = morphology.watershed(-distance, markers, watershed_line=True, mask=cleared)
-
-    logger.info('nuclei_features')
+    logger.info('storing nuclei features')
 
     # store all contours found
     contours = measure.find_contours(labels, 0.9)
@@ -128,8 +121,8 @@ def nuclei_segmentation(image, radius=10):
     return labels, _list
 
 
-def centrosomes(image, max_sigma=1):
-    blobs_log = feature.blob_log(image, min_sigma=0.05, max_sigma=max_sigma, num_sigma=10, threshold=.017)
+def centrosomes(image, min_size=0.2, max_size=0.5, threshold=0.1):
+    blobs_log = feature.blob_log(image, min_sigma=min_size, max_sigma=max_size, num_sigma=10, threshold=threshold)
     # blobs_log = feature.blob_doh(image, min_sigma=0.05, max_sigma=max_sigma, num_sigma=10, threshold=.1)
     # Compute radii in the 3rd column.
     blobs_log[:, 2] = blobs_log[:, 2] * sqrt(2)
@@ -177,7 +170,7 @@ def cell_boundary(tubulin, hoechst, threshold=80, markers=None):
     # gaussian blur on gabor filter result
     ksize = 31
     blur = cv2.GaussianBlur(bin1, (ksize, ksize), 0)
-    ret, bin2 = cv2.threshold(blur, threshold, 255, cv2.THRESH_OTSU)
+    ret, cells_mask = cv2.threshold(blur, threshold, 255, cv2.THRESH_OTSU)
     # ret, bin2 = cv2.threshold(blur, 70, 255, cv2.THRESH_BINARY)
 
     if markers is None:
@@ -187,8 +180,7 @@ def cell_boundary(tubulin, hoechst, threshold=80, markers=None):
         ret, bin_nuc = cv2.threshold(blur_nuc, 0, 255, cv2.THRESH_OTSU)
         markers = ndi.label(bin_nuc)[0]
 
-    gabor_proc = gabor
-    labels = morphology.watershed(-gabor_proc, markers, mask=bin2)
+    labels = morphology.watershed(-gabor, markers, mask=cells_mask)
 
     boundaries_list = list()
     # loop over the labels
@@ -203,130 +195,43 @@ def cell_boundary(tubulin, hoechst, threshold=80, markers=None):
         if len(boundary) >= 3:
             boundaries_list.append({'id': l, 'boundary': Polygon(boundary)})
 
-    return boundaries_list, gabor_proc
+    return boundaries_list, cells_mask > 255
 
 
-def is_valid_sample(tubulin, cell_polygon, nuclei_polygon, nuclei_list=None, pix_per_um=1):
+def exclude_contained(polygons):
+    if polygons is None: return []
+    for p in polygons:
+        p['valid'] = True
+    for p1, p2 in itertools.combinations(polygons, 2):
+        if not p1['valid'] or not p2['valid']: continue
+        if p1['boundary'].contains(p2['boundary']):
+            p2['valid'] = False
+        if p2['boundary'].contains(p1['boundary']):
+            p1['valid'] = False
+    return [p for p in polygons if p['valid']]
+
+
+def is_valid_sample(frame_polygon, cell_polygon, nuclei_polygon, nuclei_list=None):
     # check that neither nucleus or cell boundary touch the ends of the frame
-    maxw, maxh = tubulin.shape
-    frame = Polygon([(0, 0), (0, maxw), (maxh, maxw), (maxh, 0)])
 
-    if pix_per_um != 1:
-        scale = pix_per_um
-        nuclei_polygon = affinity.scale(nuclei_polygon, xfact=scale, yfact=scale, origin=(0, 0, 0))
-        cell_polygon = affinity.scale(cell_polygon, xfact=scale, yfact=scale, origin=(0, 0, 0))
-
-    # FIXME: not working
-    if frame.touches(nuclei_polygon.buffer(2)):
-        logger.debug('sample rejected because it was touching the frame')
-        return False
+    if np.any(np.abs(np.array(cell_polygon.bounds) - np.array(frame_polygon.bounds)) <= 2):
+        return False, REJECTION_TOUCHING_FRAME
     if not cell_polygon.contains(nuclei_polygon):
-        logger.debug("sample rejected because it didn't contain a nucleus")
-        return False
-
-    tubulin_int = integral_over_surface(tubulin, cell_polygon)
-    tub_density = tubulin_int / cell_polygon.area
-    logger.debug(
-        'tubulin density in cell: %0.2f, intensity %0.2f, area %0.2f' % (tub_density, tubulin_int, cell_polygon.area))
-    if tub_density < 250:
-        return False
+        return False, REJECTION_NO_NUCLEUS
 
     # make sure that there's only one nucleus inside cell
     if nuclei_list is not None:
         n_nuc = 0
-        for ncl in nuclei_list:
-            nuclei = ncl['boundary']
-            if cell_polygon.contains(nuclei):
+        for nuc in nuclei_list:
+            if cell_polygon.contains(nuc['boundary']):
                 n_nuc += 1
-        if n_nuc != 1:
-            return False
+        if n_nuc > 1:
+            return False, REJECTION_TWO_NUCLEI
 
-    return True
+    # nucleus area should be at least three to four times the are of the cell
+    area_ratio = cell_polygon.area / nuclei_polygon.area
+    if area_ratio > 5:
+        return False, REJECTION_CELL_TOO_BIG
+    logger.debug('sample accepted with an area ratio of %0.2f' % area_ratio)
 
-
-def is_valid_measured_row(row):
-    if row['centrosomes'] < 1: return False
-    if row['tubulin_dens'] < 0.5e3: return False
-    if np.isnan(row['c1_int']): return False
-    if row['c2_int'] / row['c1_int'] < 0.6: return False
-    if wkt.loads(row['nucleus']).area < 5 ** 2 * np.pi: return False
-
-    return True
-
-
-def measure_into_dataframe(hoechst, pericentrin, edu, tubulin, nuclei, cells, pix_per_um):
-    out = list()
-    df = pd.DataFrame()
-    scale = 1. / pix_per_um
-    for nucleus in nuclei:
-        x0, y0, xf, yf = [int(u) for u in nucleus['boundary'].bounds]
-
-        # search for closest cell boundary based on centroids
-        clls = list()
-        for cl in cells:
-            clls.append({'id': cl['id'],
-                         'boundary': cl['boundary'],
-                         'd': cl['boundary'].centroid.distance(nucleus['boundary'].centroid)})
-        clls = sorted(clls, key=lambda k: k['d'])
-
-        nucl_bnd = nucleus['boundary']
-        cell_bnd = clls[0]['boundary']
-        if is_valid_sample(tubulin, cell_bnd, nucl_bnd, nuclei):
-            pericentrin_crop = pericentrin[y0:yf, x0:xf]
-            logger.info('applying centrosome algorithm for nuclei %d' % nucleus['id'])
-            # self.pericentrin = exposure.equalize_adapthist(pcrop, clip_limit=0.03)
-            cntr = centrosomes(pericentrin_crop, max_sigma=pix_per_um * 0.5)
-            cntr[:, 0] += x0
-            cntr[:, 1] += y0
-            cntrsmes = list()
-            for k, c in enumerate(cntr):
-                pt = Point(c[0], c[1])
-                pti = integral_over_surface(pericentrin, pt.buffer(pix_per_um * 5))
-                cntrsmes.append({'id': k, 'pt': Point(c[0] / pix_per_um, c[1] / pix_per_um), 'i': pti})
-                cntrsmes = sorted(cntrsmes, key=lambda k: k['i'], reverse=True)
-
-            logger.debug('centrosomes {:s}'.format(str(cntrsmes)))
-
-            twocntr = len(cntrsmes) >= 2
-            c1 = cntrsmes[0] if len(cntrsmes) > 0 else None
-            c2 = cntrsmes[1] if twocntr else None
-
-            tubulin_int = integral_over_surface(tubulin, cell_bnd)
-            edu_int = integral_over_surface(edu, nucl_bnd)
-            dna_int = integral_over_surface(hoechst, nucl_bnd)
-
-            nucl_bndum = affinity.scale(nucl_bnd, xfact=scale, yfact=scale, origin=(0, 0, 0))  # in um
-            cell_bndum = affinity.scale(cell_bnd, xfact=scale, yfact=scale, origin=(0, 0, 0))  # in um
-
-            lc = 2 if c2 is not None else 1 if c1 is not None else np.nan
-            # TODO: Add units support
-            d = pd.DataFrame(data={
-                'id': [nucleus['id']],
-                'dna_int': [dna_int],
-                'edu_int': [edu_int],
-                'tubulin_int': [tubulin_int],
-                'dna_dens': [dna_int / nucl_bnd.area],
-                'tubulin_dens': [tubulin_int / cell_bnd.area],
-                'centrosomes': [lc],
-                'c1_int': [c1['i'] if c1 is not None else np.nan],
-                'c2_int': [c2['i'] if c2 is not None else np.nan],
-                'c1_d_nuc_centr': [nucl_bndum.centroid.distance(c1['pt']) if c1 is not None else np.nan],
-                'c2_d_nuc_centr': [nucl_bndum.centroid.distance(c2['pt']) if twocntr else np.nan],
-                'c1_d_nuc_bound': [nucl_bndum.exterior.distance(c1['pt']) if c1 is not None else np.nan],
-                'c2_d_nuc_bound': [nucl_bndum.exterior.distance(c2['pt']) if twocntr else np.nan],
-                'c1_d_cell_centr': [cell_bndum.centroid.distance(c1['pt']) if c1 is not None else np.nan],
-                'c2_d_cell_centr': [cell_bndum.centroid.distance(c2['pt']) if twocntr else np.nan],
-                'c1_d_cell_bound': [cell_bndum.exterior.distance(c1['pt']) if c1 is not None else np.nan],
-                'c2_d_cell_bound': [cell_bndum.exterior.distance(c2['pt']) if twocntr else np.nan],
-                'nuc_centr_d_cell_centr': [nucl_bndum.centroid.distance(cell_bndum.centroid)],
-                'c1_d_c2': [c1['pt'].distance(c2['pt']) if twocntr else np.nan],
-                'cell': cell_bndum.wkt,
-                'nucleus': nucl_bndum.wkt,
-                'c1': c1['pt'].wkt if c1 is not None else None,
-                'c2': c2['pt'].wkt if c2 is not None else None,
-            })
-            df = df.append(d, ignore_index=True, sort=False)
-
-            out.append({'id': nucleus['id'], 'cell': cell_bnd, 'nucleus': nucl_bnd,
-                        'centrosomes': [c1, c2], 'edu_int': edu_int, 'dna_int': dna_int})
-    return out, df
+    return True, None

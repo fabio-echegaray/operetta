@@ -1,0 +1,58 @@
+######################################################################
+# Options for the batch system
+# These options are not executed by the script, but are instead read by the
+# batch system before submitting the job. Each option is preceeded by '#$' to
+# signify that it is for grid engine.
+#
+# All of these options are the same as flags you can pass to qsub on the
+# command line and can be **overriden** on the command line. see man qsub for
+# all the details
+######################################################################
+# -- The shell used to interpret this script
+#$ -S /bin/bash
+# -- Execute this job from the current working directory.
+#$ -cwd
+# -- use the trial.q
+#$ -q trial.q
+# -- Job output to stderr will be merged into standard out. Remove this line if
+# -- you want to have separate stderr and stdout log files
+#$ -j y
+# #$ -o output/
+#$ -o output/$JOB_ID.$TASK_ID.log
+# -- Send email when the job exits, is aborted or suspended
+# #$ -m eas
+# #$ -M fe56@sussex.ac.uk
+
+######################################################################
+# Job Script
+# Here we are writing in bash (as we set bash as our shell above). In here you
+# should set up the environment for your program, copy around any data that
+# needs to be copied, and then execute the program
+######################################################################
+# Here we execute usual shell commands like any other shell script. The
+# output here will be sent to the job's standard out
+echo "Running job script"
+
+# Finally we run our executable. Here we are passing the command line argument
+# above to the script
+
+# ****
+# Here we have a new environment variable that is only set for array
+# jobs - $SGE_TASK_ID. This is the value of the task ID for each array
+# job, so if we asked for an array job with 10 tasks, then SGE_TASK_ID
+# will range from 1 to 10
+
+# We are using the SGE_TASK_ID variable to read a particular line from
+# the index file
+
+module load python/intel/3.6.039
+source ~/py36/bin/activate
+if [ -z "$DATA_FOLDER" ]
+then
+    echo "Please set \$DATA_FOLDER"
+else
+    python3 batch.py --render --id $SGE_TASK_ID $DATA_FOLDER
+    sleep 1
+fi
+echo
+echo "Finished job script."
