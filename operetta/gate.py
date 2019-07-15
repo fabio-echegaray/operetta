@@ -36,7 +36,7 @@ class CellCycle():
         assert not config.has_section(section), 'section already in gate config file.'
         config.add_section(section)
         # _c = l[l[['Cell Type', 'Cell Count', 'Compound', 'Concentration']].apply(tuple, axis=1).isin(_i)]
-        _c = df[(df['Cell Type'] == cell_type) & (df['Cell Count'] == cell_count) & (
+        _c = df[(df['Cell Type'] == cell_type) & (df['Cell Count'] == float(cell_count)) & (
                 df['Compound'] == compound) & (df['Concentration'] == concentration)]
         config.set(section, 'pandas_rows', sorted(_c["row"].unique()))
         config.set(section, 'pandas_cols', sorted(_c["col"].unique()))
@@ -179,10 +179,12 @@ class CellCycle():
                                          ellipse1, ellipse2, circle)
 
             # assign a cluster id for every polygon
+            if dfg.empty: continue
             for i, poly in enumerate(den.polygons()):
                 ix = dfg['facs'].apply(lambda g: g.within(poly))
                 dfg.loc[ix, 'cluster'] = i
             dfg = dfg[~dfg["cluster"].isna()]
+            if dfg.empty: continue
 
             rorder = sorted(dfg["cluster"].unique())
             g = sns.FacetGrid(dfg, row="cluster", row_order=rorder, height=1.5, aspect=5)

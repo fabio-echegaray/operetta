@@ -15,6 +15,7 @@ import skimage.morphology as morphology
 import skimage.segmentation as segmentation
 import skimage.transform as tf
 from shapely.geometry.polygon import Polygon
+from scipy.ndimage.morphology import distance_transform_edt
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger('hhlab')
@@ -76,7 +77,7 @@ def integral_over_surface(image, polygon):
         return np.nan
 
 
-def nuclei_segmentation(image, radius=10):
+def nuclei_segmentation(image, compute_distance=False, radius=10):
     # apply threshold
     logger.debug('thresholding images')
     thresh_val = filters.threshold_otsu(image)
@@ -89,30 +90,20 @@ def nuclei_segmentation(image, radius=10):
 
     if len(cleared[cleared > 0]) == 0: return None, None
 
-    # logger.debug('computing Lapacian of Gaussian for image')
-    # image = exposure.equalize_hist(image)  # improves detection
-    # image_gray = color.rgb2gray(image)
-    # markers = np.zeros(image.shape, dtype=np.int8)
-    # points = feature.blob_log(image_gray, min_sigma=0.8 * radius, max_sigma=radius, num_sigma=10, threshold=.1)
-    # # points = feature.blob_dog(image_gray, min_sigma=0.5 * radius, max_sigma=radius, threshold=1.0)
-    # print(points)
-    # if len(points) == 0:
-    #     logger.info('no nuclei found for current stack')
-    #     return None, None
-    # for k, (r, c, sg) in enumerate(points, start=1):
-    #     markers[int(r), int(c)] = k
+    if compute_distance:
+        distance = distance_transform_edt(cleared)
+        local_maxi = feature.peak_local_max(distance, indices=False, labels=cleared,
+                                            min_distance=radius / 4, exclude_border=False)
+        markers, num_features = ndi.label(local_maxi)
+        if num_features == 0:
+            logger.info('no nuclei found for current stack')
+            return None, None
 
-    distance = distance_transform_edt(cleared)
-    local_maxi = feature.peak_local_max(distance, indices=False, labels=cleared,
-                                        min_distance=radius / 4, exclude_border=False)
-    markers, num_features = ndi.label(local_maxi)
-    if num_features == 0:
-        logger.info('no nuclei found for current stack')
-        return None, None
+        labels = morphology.watershed(-distance, markers, watershed_line=True, mask=cleared)
+    else:
+        labels = cleared
 
-    labels = morphology.watershed(-distance, markers, watershed_line=True, mask=cleared)
-
-    logger.info('nuclei_features')
+    logger.info('storing nuclei features')
 
     # store all contours found
     contours = measure.find_contours(labels, 0.9)
