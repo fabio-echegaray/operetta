@@ -2,7 +2,9 @@ import os
 import xml.etree.ElementTree
 import json
 import re
+import matplotlib
 
+matplotlib.use("agg")
 import numpy as np
 import pandas as pd
 from skimage import io
@@ -34,11 +36,11 @@ class Montage:
 
         csv_path = os.path.join(folder, 'out', 'operetta.csv')
         if not os.path.exists(csv_path):
-            logger.warning('File operetta.csv is missing in the folder structure, generating it now.')
+            logger.warning("File operetta.csv is missing in the folder structure, generating it now.\r\n"
+                           "\tA new folder wit the name 'out' will be created. You can safely delete this"
+                           "\tfolder if you don't want any of the analisys output from this tool.")
 
-            self.files = self.generate_images_structure(folder)
-            op_csv = ensure_dir(os.path.join(folder, 'out', 'operetta.csv'))
-            self.files.to_csv(op_csv, index=False)
+            self._generate_directory_structure()
         else:
             self.files = pd.read_csv(csv_path)
 
@@ -60,16 +62,6 @@ class Montage:
         self._layout = None
 
         self.flatfield_profiles = None
-        if os.path.exists(self.ffc_path):
-            self.flat_field_profile()
-
-        if os.path.exists(self.images_path):
-            try:
-                self._generate_sample_image()
-            except Exception as e:
-                logger.error(e)
-        else:
-            raise ImagesFolderNotFound('Images folder is not in the structure.')
 
     @staticmethod
     def filename(row):
@@ -109,7 +101,7 @@ class Montage:
             logger.debug('retrieving image id=%d row=%d col=%d fid=%d' % (id, row, col, fid))
             return self._max_projection_row_col_fid(row, col, fid)
 
-        elif len(args) == 3 and np.all([np.issubdtype(a, np.integer) for a in args]):
+        elif len(args) == 3 and np.all([np.issubdtype(type(a), np.integer) for a in args]):
             row, col, fid = args[0], args[1], args[2]
             return self._max_projection_row_col_fid(row, col, fid)
 
@@ -182,7 +174,6 @@ class Montage:
         """ Locates the assay layout xml file in the folder structure, and constructs a pandas dataframe from it. """
         if self._layout is not None: return self._layout
 
-
         _xmld = "{http://www.perkinelmer.com/PEHH/HarmonyV5}"
         ns = {'d': 'http://www.perkinelmer.com/PEHH/HarmonyV5'}
         for root, directories, filenames in os.walk(self.assay_layout_path):
@@ -252,25 +243,21 @@ class Montage:
                     map = [i for i in e if i.tag[-3:] == 'Map'][0]
 
                     self.flatfield_profiles = list()
-                    # regex1 = re.compile(r"{([a-zA-Z]+): ")
-                    # regex2 = re.compile(r", ([a-zA-Z]+): ")
                     regex = re.compile(r"([a-zA-Z]+[ ]?[0-9]*)")
                     for p in map:
-                        # info = {'ChannelId': p.attrib['ChannelID']}
                         for ffp in p:
                             txt = ffp.text
-                            # txt = regex1.sub(r'{"\1": ', txt)
-                            # txt = regex2.sub(r', "\1": ', txt)
                             txt = regex.sub(r'"\1"', txt)
                             txt = txt.replace('"Acapella":2013', '"Acapella:2013"')
                             self.flatfield_profiles.append(json.loads(txt))
 
                     for profile in self.flatfield_profiles:
                         for plane in ['Background', 'Foreground']:
+                            if not plane in profile: continue
                             if profile[plane]['Profile']['Type'] != 'Polynomial': continue
                             dims = profile[plane]['Profile']['Dims']
-                            ori = profile[plane]['Profile']['Origin']
-                            sca = profile[plane]['Profile']['Scale']
+                            # ori = profile[plane]['Profile']['Origin']
+                            # sca = profile[plane]['Profile']['Scale']
                             # ones = np.multiply(dims, sca)
                             # x = (np.arange(0, dims[0], 1) - ori[0]) * sca[0]
                             # y = (np.arange(0, dims[1], 1) - ori[1]) * sca[1]
@@ -288,6 +275,9 @@ class Montage:
         logger.info("flat field correction calculated from coefficients.")
 
     def _flat_field_correct(self, img, channel):
+        if self.flatfield_profiles is None and os.path.exists(self.ffc_path):
+            self.flat_field_profile()
+
         if self.flatfield_profiles is not None:
             for profile in self.flatfield_profiles:
                 if profile['Channel'] != channel: continue
@@ -300,3 +290,16 @@ class Montage:
                 img = np.divide((img - dk), gain).astype(np.int16)
 
         return img
+
+    def _generate_directory_structure(self):
+        self.files = self.generate_images_structure(self.base_path)
+        op_csv = ensure_dir(os.path.join(self.base_path, 'out', 'operetta.csv'))
+        self.files.to_csv(op_csv, index=False)
+
+        if os.path.exists(self.images_path):
+            try:
+                self._generate_sample_image()
+            except Exception as e:
+                logger.error(e)
+        else:
+            raise ImagesFolderNotFound('Images folder is not in the structure.')
