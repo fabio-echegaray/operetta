@@ -17,26 +17,6 @@ logging.getLogger('shapely').setLevel(logging.ERROR)
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
 
-def batch_process_operetta_folder(path):
-    operetta = o.ConfiguredChannels(path)
-    outdf = pd.DataFrame()
-    for row, col, fid in operetta.stack_generator():
-        try:
-            df = operetta.measure(row, col, fid)
-            outdf = outdf.append(df, ignore_index=True, sort=False)
-        except o.NoSamplesError as e:
-            logger.error(e)
-            traceback.print_stack()
-
-    if not outdf.empty: pd.to_pickle(outdf, operetta.save_path('nuclei.pandas'))
-
-
-def batch_render(images_path):
-    operetta = o.ConfiguredChannels(images_path)
-    for row, col, fid in operetta.stack_generator():
-        operetta.save_render(row, col, fid, max_width=300)
-
-
 def collect(path):
     df = pd.DataFrame()
     for root, directories, filenames in os.walk(os.path.join(path)):
@@ -47,8 +27,9 @@ def collect(path):
                     csv = pd.read_csv(os.path.join(root, filename))
                     df = df.append(csv, ignore_index=True)
                 except EmptyDataError:
-                    # logger.warning('found empty csv file: %s' % filename)
-                    pass
+                    logger.warning('found empty csv file: %s' % filename)
+                    # traceback.print_stack()
+
     return df
 
 
@@ -73,14 +54,12 @@ if __name__ == '__main__':
     import argparse
 
     parser = argparse.ArgumentParser(description='Process operetta images.')
-    parser.add_argument('folder', metavar='F', type=str,
+    parser.add_argument('folder', metavar='FOLDER', type=str,
                         help='folder where operetta images reside')
     parser.add_argument('--render', action='store_true',
-                        help='render images (in a folder called render up in the hierarchy)')
+                        help='render image with id given by --id (in a folder called render up in the hierarchy)')
     parser.add_argument('--image', action='store_true',
                         help='retrieve image of the stack with id extracted from --id into a tiff file')
-    parser.add_argument('--plot', action='store_true',
-                        help='plot all graphs')
     parser.add_argument('--measure', action='store_true',
                         help='measure_into_dataframe features on the dataset')
     parser.add_argument('--id', type=int,
@@ -95,17 +74,16 @@ if __name__ == '__main__':
         source ~/py36/bin/activate
     """
 
-    if args.measure and args.id:
-        raise BadParameterError("measure and hpc modes are not allowed in the same command call")
-
     if args.id:
         import operetta as o
         import numpy as np
 
         operetta = o.ConfiguredChannels(args.folder)
 
-        if args.render:
+        if args.measure:
             df = operetta.measure(args.id)
+
+        if args.render:
             operetta.save_render(args.id, max_width=300)
 
         if args.image:
@@ -115,12 +93,15 @@ if __name__ == '__main__':
             image = operetta.max_projection(args.id)
             imsave('%d.tiff' % args.id, np.array(image))
 
-            # if hasattr(operetta, 'flatfield_profiles'):
-            #     for plane in ['Background', 'Foreground']:
-            #         ffp = [p[plane]['Profile']['Image'] for p in operetta.flatfield_profiles]
-            #         imsave('ffp-%s.tiff' % plane.lower(), np.array(ffp))
+    if args.id:  # done with processing arguments requiring id
+        logger.info("done with processing arguments requiring id")
+        exit(0)
 
-    if args.collect and not args.id:
+    if (args.measure or args.render or args.image) and not args.id:
+        logger.error("id needed for operation")
+        exit(1)
+
+    if args.collect:
         import pandas as pd
 
         well_cfg_path = os.path.join(args.folder, 'out', 'wells.cfg')
