@@ -84,6 +84,7 @@ class ConfiguredChannels(Montage):
                         'channel name': config.get(section, 'channel name'),
                         'tag': config.get(section, 'tag'),
                         'pipeline': ast.literal_eval(config.get(section, 'pipeline')),
+                        'rng_thickness': config.getfloat(section, 'rng_thickness', fallback=0),
                         'render': config.getboolean(section, 'render'),
                         'render intensity': config.getfloat(section, 'render intensity'),
                         'flatfield': config.getboolean(section, 'flat field correction')
@@ -96,10 +97,16 @@ class ConfiguredChannels(Montage):
             config.add_section('Information')
             config.set('Information', '#')
             config.set('Information', '# allowed functions for the pipeline are: nucleus, cell, '
-                                      'intensity_in_nucleus, particle_in_cytoplasm')
+                                      'intensity_in_nucleus, ring_around_nucleus, particle_in_cytoplasm')
+            config.set('Information', '#')
+            config.set('Information', '# Accepted parameters:')
+            config.set('Information', '#     for ring_around_nucleus:')
+            config.set('Information', '#         rng_thickness: Thickness of the ring, in um.')
+            config.set('Information', '#')
+            config.set('Information', '#')
 
             config.add_section('General')
-            config.set('General', 'Version', 'v0.1')
+            config.set('General', 'Version', 'v0.2')
             config.set('General', 'channels', len(self.channels))
 
             for i, c in enumerate(sorted(self.channels)):
@@ -174,7 +181,7 @@ class ConfiguredChannels(Montage):
         fig_general = Figure((max_width * 4 / 150, max_width * 4 / 150), dpi=150)
         canvas_g = FigureCanvas(fig_general)
         axg = fig_general.gca()
-        axg.plot(frx, fry, color='red', linewidth=2, solid_capstyle='round', zorder=1)
+        axg.plot(frx, fry, color='red', linewidth=2, solid_capstyle='round', zorder=10)
         for ch in cfg_ch:
             _img = images[ch['number']]
             if ch['flatfield']:
@@ -196,10 +203,18 @@ class ConfiguredChannels(Montage):
             nucleus = shapely.wkt.loads(smp['nucleus'].iloc[0])
             cell = shapely.wkt.loads(smp['cell'].iloc[0]) if 'cell' in smp and not smp['cell'].isna().iloc[0] else None
 
-            c1 = shapely.wkt.loads(smp['c1'].iloc[0]) if not smp['c1'].isna().iloc[0] else None
-            c2 = shapely.wkt.loads(smp['c2'].iloc[0]) if not smp['c2'].isna().iloc[0] else None
-            p.render_cell(nucleus, cell, [c1, c2], ax=axg)
-            axg.text(nucleus.centroid.x + 2, nucleus.centroid.y - 1, ix, color='red')
+            if 'c1' in smp and 'c2' in smp:
+                c1 = shapely.wkt.loads(smp['c1'].iloc[0])
+                c2 = shapely.wkt.loads(smp['c2'].iloc[0])
+                centr = [c1, c2]
+            else:
+                centr = None
+
+            p.render_cell(nucleus, cell, centr, base_zorder=20, ax=axg)
+            if 'ring' in smp:
+                ring = shapely.wkt.loads(smp['ring'].iloc[0])
+                p.render_polygon(ring, zorder=10, ax=axg)
+            axg.text(nucleus.centroid.x + 2, nucleus.centroid.y - 1, ix, color='red', zorder=50)
 
         axg.plot([5, 5 + 10], [5, 5], c='w', lw=4)
         axg.text(5 + 1, 5 + 1.5, '10 um', color='w')
@@ -208,7 +223,7 @@ class ConfiguredChannels(Montage):
         axg.set_xlim([0, w_um])
         axg.set_ylim([0, h_um])
         axg.set_axis_on()
-        # fig_general.tight_layout()
+
         pil = canvas_to_pil(canvas_g)
         name = 'r%d-c%d-f%d.jpg' % (row, col, fid)
         fpath = os.path.abspath(os.path.join(basepath, name))
@@ -224,13 +239,19 @@ class ConfiguredChannels(Montage):
             nucleus = shapely.wkt.loads(smp['nucleus'].values[0])
             cell = shapely.wkt.loads(smp['cell'].iloc[0]) if 'cell' in smp and not smp['cell'].isna().iloc[0] else None
 
-            c1 = shapely.wkt.loads(smp['c1'].iloc[0]) if not smp['c1'].isna().iloc[0] else None
-            c2 = shapely.wkt.loads(smp['c2'].iloc[0]) if not smp['c2'].isna().iloc[0] else None
+            if 'c1' in smp and 'c2' in smp:
+                c1 = shapely.wkt.loads(smp['c1'].iloc[0])
+                c2 = shapely.wkt.loads(smp['c2'].iloc[0])
+                centr = [c1, c2]
+            else:
+                centr = None
 
             # render and save closeup image
             axc.cla()
-            p.render_cell(nucleus, cell, [c1, c2], ax=axc)
-
+            p.render_cell(nucleus, cell, centr, base_zorder=20, ax=axc)
+            if 'ring' in smp:
+                ring = shapely.wkt.loads(smp['ring'].iloc[0])
+                p.render_polygon(ring, zorder=10, ax=axc)
             _m = 30
             x0, xf = nucleus.centroid.x - _m, nucleus.centroid.x + _m
             y0, yf = nucleus.centroid.y - _m, nucleus.centroid.y + _m
@@ -238,9 +259,9 @@ class ConfiguredChannels(Montage):
             axc.set_xlim(x0, xf)
             axc.set_ylim(y0, yf)
             axc.plot([x0, x0 + 10], [y0 + 0.5, y0 + 0.5], c='w', lw=4)
-            axc.text(x0 + 1, y0 + 0.6, '10 um', color='w')
+            axc.text(x0 + 1, y0 + 0.6, '10 um', color='w', zorder=50)
             if "cluster" in smp:
-                axc.text(nucleus.centroid.x, nucleus.centroid.y, smp["cluster"], color='w', zorder=10)
+                axc.text(nucleus.centroid.x, nucleus.centroid.y, smp["cluster"].iloc[0], color='w', zorder=10)
 
             pil = canvas_to_pil(canvas_c)
             name = 'r%d-c%d-f%d-i%d.jpg' % (row, col, fid, ix)
@@ -400,6 +421,32 @@ class ConfiguredChannels(Montage):
                     ix = df['id'] == nucleus['id']
                     df.loc[ix, '%s_int' % cf['tag']] = signal_int
                     df.loc[ix, '%s_dens' % cf['tag']] = signal_density
+
+        # --------------------
+        #     Ring around nucleus
+        # --------------------
+        c = cfg[cfg['pipeline'].apply(lambda l: 'ring_around_nucleus' in l)]
+        for _, cf in c.iterrows():
+            _img = images[cf['number']]
+            if cf['flatfield']:
+                _img = self._flat_field_correct(_img, cf['number'])
+
+            for nucleus in nuclei:
+                logger.debug("ring_around_nucleus for nucleus id %d" % nucleus['id'])
+                nucl_bnd = nucleus['boundary']
+                thickness = float(cf['rng_thickness']) if not np.isnan(cf['rng_thickness']) in cf else 3.0
+                thickness *= self.pix_per_um
+                rng_bnd = nucl_bnd.buffer(thickness).difference(nucl_bnd)
+                rng_int = m.integral_over_surface(_img, rng_bnd)
+                rng_density = rng_int / rng_bnd.area
+
+                rng_um = affinity.scale(rng_bnd, xfact=self.um_per_pix, yfact=self.um_per_pix, origin=(0, 0, 0))
+
+                # TODO: scale intensity from pixels^2 to um^2
+                ix = df['id'] == nucleus['id']
+                df.loc[ix, 'ring'] = rng_um.wkt
+                df.loc[ix, '%s_rng_int' % cf['tag']] = rng_int
+                df.loc[ix, '%s_rng_dens' % cf['tag']] = rng_density
 
         # --------------------
         #     Particle in cytoplasm
