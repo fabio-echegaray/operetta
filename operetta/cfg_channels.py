@@ -196,6 +196,8 @@ class ConfiguredChannels(Montage):
                     out += _img * p.colors.alexa_488 * ch['render intensity']
                 if operation == 'intensity_in_nucleus' and ch['render']:
                     out += _img * p.colors.alexa_647 * ch['render intensity']
+                if operation == 'ring_around_nucleus' and ch['render']:
+                    out += _img * p.colors.alexa_647 * ch['render intensity']
                 if operation == 'particle_in_cytoplasm' and ch['render']:
                     out += _img * p.colors.alexa_594 * ch['render intensity']
 
@@ -213,6 +215,7 @@ class ConfiguredChannels(Montage):
             p.render_cell(nucleus, cell, centr, base_zorder=20, ax=axg)
             if 'ring' in smp:
                 ring = shapely.wkt.loads(smp['ring'].iloc[0])
+                if ring.area == 0: continue
                 p.render_polygon(ring, zorder=10, ax=axg)
             axg.text(nucleus.centroid.x + 2, nucleus.centroid.y - 1, ix, color='red', zorder=50)
 
@@ -235,6 +238,7 @@ class ConfiguredChannels(Montage):
         fig_closeup = Figure((max_width / 150, max_width / 150), dpi=150)
         canvas_c = FigureCanvas(fig_closeup)
         axc = fig_closeup.gca()
+        axc.set_facecolor('xkcd:salmon')
         for ix, smp in dfi.groupby('id'):
             nucleus = shapely.wkt.loads(smp['nucleus'].values[0])
             cell = shapely.wkt.loads(smp['cell'].iloc[0]) if 'cell' in smp and not smp['cell'].isna().iloc[0] else None
@@ -251,15 +255,18 @@ class ConfiguredChannels(Montage):
             p.render_cell(nucleus, cell, centr, base_zorder=20, ax=axc)
             if 'ring' in smp:
                 ring = shapely.wkt.loads(smp['ring'].iloc[0])
+                if ring.area == 0: continue
                 p.render_polygon(ring, zorder=10, ax=axc)
             _m = 30
             x0, xf = nucleus.centroid.x - _m, nucleus.centroid.x + _m
             y0, yf = nucleus.centroid.y - _m, nucleus.centroid.y + _m
+            if x0 < 0: xf -= x0
+            if y0 < 0: yf -= y0
             axc.imshow(out, extent=[0, w_um, h_um, 0])
             axc.set_xlim(x0, xf)
             axc.set_ylim(y0, yf)
-            axc.plot([x0, x0 + 10], [y0 + 0.5, y0 + 0.5], c='w', lw=4)
-            axc.text(x0 + 1, y0 + 0.6, '10 um', color='w', zorder=50)
+            axc.plot([x0 + 5, x0 + 15], [y0 + 5, y0 + 5], c='w', lw=4)
+            axc.text(x0 + 5, y0 + 7, '10 um', color='w', zorder=50)
             if "cluster" in smp:
                 axc.text(nucleus.centroid.x, nucleus.centroid.y, smp["cluster"].iloc[0], color='w', zorder=10)
 
@@ -270,7 +277,7 @@ class ConfiguredChannels(Montage):
 
     def measure(self, *args):
         if len(args) == 1 and isinstance(args[0], int):
-            _id = int(args[0])
+            _id = args[0]
             r = self.files_gr.ix[_id - 1]
             row, col, fid = r['row'], r['col'], r['fid']
             logger.debug('measuring id=%d row=%d col=%d fid=%d' % (_id, row, col, fid))
@@ -426,20 +433,28 @@ class ConfiguredChannels(Montage):
         #     Ring around nucleus
         # --------------------
         c = cfg[cfg['pipeline'].apply(lambda l: 'ring_around_nucleus' in l)]
+        assert len(c) < 2, 'only one ring measurement step per batch allowed at the moment'
+
         for _, cf in c.iterrows():
             _img = images[cf['number']]
             if cf['flatfield']:
                 _img = self._flat_field_correct(_img, cf['number'])
 
             for nucleus in nuclei:
-                logger.debug("ring_around_nucleus for nucleus id %d" % nucleus['id'])
                 nucl_bnd = nucleus['boundary']
                 thickness = float(cf['rng_thickness']) if not np.isnan(cf['rng_thickness']) in cf else 3.0
                 thickness *= self.pix_per_um
                 rng_bnd = nucl_bnd.buffer(thickness).difference(nucl_bnd)
-                rng_int = m.integral_over_surface(_img, rng_bnd)
-                rng_density = rng_int / rng_bnd.area
+                if rng_bnd.area > 0:
+                    rng_int = m.integral_over_surface(_img, rng_bnd)
+                    rng_density = rng_int / rng_bnd.area
+                else:
+                    logger.warning("Ring polygon with no area!\r\nThickness of ring set to %.2f [pix]" % thickness)
+                    rng_int = 0
+                    rng_density = 0
 
+                logger.debug("ring_around_nucleus on tag '%s' for nucleus id %d of %s" % (
+                    cf['tag'], nucleus['id'], m.eng_string(rng_int, si=True, format='%.2f')))
                 rng_um = affinity.scale(rng_bnd, xfact=self.um_per_pix, yfact=self.um_per_pix, origin=(0, 0, 0))
 
                 # TODO: scale intensity from pixels^2 to um^2

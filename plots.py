@@ -1,3 +1,4 @@
+import matplotlib
 import matplotlib.pyplot as plt
 from matplotlib.path import Path
 from matplotlib.patches import PathPatch
@@ -6,6 +7,8 @@ from matplotlib.ticker import EngFormatter
 import numpy as np
 import matplotlib.colors as mcolors
 from numpy import asarray, concatenate, ones
+
+matplotlib.rcParams['hatch.linewidth'] = 0.1
 
 
 class colors():
@@ -116,8 +119,11 @@ def render_polygon(polygon: Polygon, zorder=0, ax=None):
     if ax is None:
         ax = plt.gca()
 
+    x, y = polygon.exterior.xy
+    ax.plot(x, y, color='white', linewidth=0.5, solid_capstyle='round', zorder=zorder)
+
     path = pathify(polygon)
-    patch = PathPatch(path, facecolor='none', edgecolor='white', hatch='//', lw=0.01, zorder=zorder)
+    patch = PathPatch(path, facecolor='none', edgecolor='white', hatch='/////', lw=0.01, zorder=zorder)
 
     ax.add_patch(patch)
     ax.set_aspect(1.0)

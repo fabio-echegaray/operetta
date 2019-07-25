@@ -8,6 +8,7 @@ matplotlib.use("agg")
 import numpy as np
 import pandas as pd
 from skimage import io
+import skimage.exposure as exposure
 
 from .exceptions import ImagesFolderNotFound
 from . import logger
@@ -35,11 +36,12 @@ class Montage:
         self.name = condition_name
 
         csv_path = os.path.join(folder, 'out', 'operetta.csv')
+        generate_structure = False
         if not os.path.exists(csv_path):
             logger.warning("File operetta.csv is missing in the folder structure, generating it now.\r\n"
-                           "\tA new folder wit the name 'out' will be created. You can safely delete this"
-                           "\tfolder if you don't want any of the analisys output from this tool.")
-
+                           "\tA new folder with the name 'out' will be created. You can safely delete this\r\n"
+                           "\tfolder if you don't want any of the analisys output from this tool.\r\n")
+            generate_structure = True
             self._generate_directory_structure()
         else:
             self.files = pd.read_csv(csv_path)
@@ -57,11 +59,13 @@ class Montage:
         self.files_gr = self.files.groupby(['row', 'col', 'fid']).size().reset_index()
         logger.info("%d image stacks available." % len(self.files_gr))
 
-        self.um_per_pix = None
-        self.pix_per_um = None
         self._layout = None
-
         self.flatfield_profiles = None
+
+        if generate_structure and os.path.exists(self.images_path):
+            self._generate_sample_image()
+        else:
+            raise ImagesFolderNotFound('Images folder is not in the structure.')
 
     @staticmethod
     def filename(row):
@@ -83,6 +87,18 @@ class Montage:
     @property
     def z_positions(self):
         return self.files['p'].unique()
+
+    @property
+    def um_per_pix(self):
+        um_per_pix = self.files['um_per_pix'].unique()
+        assert len(um_per_pix) == 1, 'different resolutions for dataset'
+        return float(um_per_pix[0])
+
+    @property
+    def pix_per_um(self):
+        pix_per_um = self.files['pix_per_um'].unique()
+        assert len(pix_per_um) == 1, 'different resolutions for dataset'
+        return float(pix_per_um[0])
 
     def stack_generator(self):
         l = len(self.files_gr)
@@ -107,12 +123,6 @@ class Montage:
 
     def _max_projection_row_col_fid(self, row, col, f):
         group = self.files[(self.files['row'] == row) & (self.files['col'] == col) & (self.files['fid'] == f)]
-        um_per_pix = group['um_per_pix'].unique()
-        pix_per_um = group['pix_per_um'].unique()
-        assert len(um_per_pix) == 1 and len(pix_per_um) == 1, 'different resolutions for projection'
-        self.um_per_pix = um_per_pix[0]
-        self.pix_per_um = pix_per_um[0]
-
         channels = list()
         for ic, c in group.groupby('ch'):  # iterate over channels
             files = list()
@@ -166,6 +176,8 @@ class Montage:
             lambda rx: convert_to(rx * meter / pix, um / pix).n().args[0])
         f.loc[:, 'pix_per_um'] = 1 / f['um_per_pix']
         f.drop(['ImageResolutionX', 'ImageResolutionY'], axis=1, inplace=True)
+        for key in ['row', 'col', 'fid', 'ch', 'tid']:
+            f.loc[:, key] = f[key].astype('int32')
         return f[['row', 'col', 'fid', 'p', 'ch', 'tid', 'fl', 'ChannelName', 'um_per_pix', 'pix_per_um',
                   'ObjectiveMagnification', 'ObjectiveNA', 'filename', 'id', ]]
 
@@ -210,6 +222,7 @@ class Montage:
         from matplotlib.figure import Figure
         from gui.utils import canvas_to_pil
 
+        logger.debug("Generating sample image...")
         cfg_ch = self.files.groupby(['ch', 'ChannelName']).size().reset_index().drop(0, axis=1)
         max_ch = cfg_ch['ch'].max()
         images = self.max_projection(np.random.randint(len(self.files_gr)))
@@ -221,6 +234,8 @@ class Montage:
 
         for i in range(4):
             images = self.max_projection(np.random.randint(len(self.files_gr)))
+            images = [exposure.equalize_hist(im) for im in images]
+
             for im, ch, title in zip(images, cfg_ch['ch'], cfg_ch['ChannelName']):
                 sp = i * 4 + ch
                 ax = fig.add_subplot(max_ch, 4, sp)
@@ -295,11 +310,3 @@ class Montage:
         self.files = self.generate_images_structure(self.base_path)
         op_csv = ensure_dir(os.path.join(self.base_path, 'out', 'operetta.csv'))
         self.files.to_csv(op_csv, index=False)
-
-        if os.path.exists(self.images_path):
-            try:
-                self._generate_sample_image()
-            except Exception as e:
-                logger.error(e)
-        else:
-            raise ImagesFolderNotFound('Images folder is not in the structure.')
