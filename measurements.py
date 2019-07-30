@@ -82,6 +82,19 @@ def integral_over_surface(image, polygon: Polygon):
         return np.nan
 
 
+def generate_mask_from(polygon: Polygon, shape=None):
+    if shape is None:
+        minx, miny, maxx, maxy = polygon.bounds
+        image = np.zeros((maxx - minx, maxy - miny), dtype=np.bool)
+    else:
+        image = np.zeros(shape, dtype=np.bool)
+
+    c, r = polygon.boundary.xy
+    rr, cc = draw.polygon(r, c)
+    image[rr, cc] = True
+    return image
+
+
 def nuclei_segmentation(image, compute_distance=False, radius=10):
     # apply threshold
     logger.debug('thresholding images')

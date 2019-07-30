@@ -131,17 +131,32 @@ class Montage:
                     files.append(self.filename(z))
             first_file = os.path.join(self.images_path, files.pop())
             try:
-                max = io.imread(first_file)
+                max_img = io.imread(first_file)
                 for f in files:
                     fname = os.path.join(self.images_path, f)
                     img = io.imread(fname)
-                    max = np.maximum(max, img)
+                    max_img = np.maximum(max_img, img)
 
-                channels.append(max)
+                channels.append(max_img)
             except Exception as e:
                 logger.error(e)
 
         assert len(channels) > 0, 'no images out of max projection'
+        return channels
+
+    def image(self, row=0, col=0, fid=0, zpos=0):
+        f = self.files[(self.files['row'] == row) & (self.files['col'] == col) &
+                       (self.files['fid'] == fid) & (self.files['p'] == zpos)]
+
+        channels = list()
+        for ic, c in f.groupby('ch'):  # iterate over channels
+            try:
+                img = io.imread(os.path.join(self.images_path, self.filename(c)))
+                channels.append(img)
+            except Exception as e:
+                logger.error(e)
+
+        assert len(channels) > 0, 'no images out extracted'
         return channels
 
     def measure(self, row, col, f):
