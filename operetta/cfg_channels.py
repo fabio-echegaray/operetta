@@ -384,8 +384,6 @@ class ConfiguredChannels(Montage):
         #     Intensity in nucleus
         # --------------------
         c = cfg[cfg['pipeline'].apply(lambda l: 'intensity_in_nucleus' in l)]
-        if not c.empty:
-            assert self.cells_measured, 'intensity_in_nucleus currently needs cell data'
         for _, cf in c.iterrows():
             self._stack_operation(row, col, fid, c, self._measure_intensity_in_nucleus)
 
@@ -445,7 +443,7 @@ class ConfiguredChannels(Montage):
         # generate an image based on nuclei found previously
         nuclei_img = np.zeros(cell_img.shape, dtype=np.bool)
         nuclei = list()
-        for _id, nuc in self._mdf.set_index("id").loc[self._ix, "nuc_pix"]:
+        for _id, nuc in self._mdf.set_index("id").loc[self._ix, "nuc_pix"].iteritems():
             _nimg = m.generate_mask_from(nuc, cell_img.shape)
             nuclei_img = nuclei_img | _nimg
             nuclei.append({"id": _id, "boundary": shapely.wkt.loads(nuc)})
@@ -497,21 +495,16 @@ class ConfiguredChannels(Montage):
 
     def _measure_intensity_in_nucleus(self, image, cfg):
         assert self._ix.any(), "no rows in the filtered dataframe"
-        width, height = image.shape
-        frame = Polygon([(0, 0), (0, height), (width, height), (width, 0)])
 
         nuclei = list()
-        for _id, nuc in self._mdf.set_index("id").loc[self._ix, "nuc_pix"]:
+        for _id, nuc in self._mdf.set_index("id").loc[self._ix, "nuc_pix"].iteritems():
             nuclei.append({"id": _id, "boundary": shapely.wkt.loads(nuc)})
 
         for ix, row in self._mdf[self._ix].iterrows():
             id = row["id"]
             nucl_bnd = shapely.wkt.loads(row["nuc_pix"])
-            cell_bnd = shapely.wkt.loads(row["cell_pix"])
 
-            valid_sample, reason = m.is_valid_sample(frame, cell_bnd, nucl_bnd, nuclei)
-            if not valid_sample: continue
-            logger.debug("intensity_in_nucleus for cell id %d" % id)
+            logger.debug("intensity_in_nucleus for nucleus id %d" % id)
             signal_int = m.integral_over_surface(image, nucl_bnd)
             signal_density = signal_int / nucl_bnd.area
 
@@ -550,7 +543,7 @@ class ConfiguredChannels(Montage):
         frame = Polygon([(0, 0), (0, height), (width, height), (width, 0)])
 
         nuclei = list()
-        for _id, nuc in self._mdf.set_index("id").loc[self._ix, "nuc_pix"]:
+        for _id, nuc in self._mdf.set_index("id").loc[self._ix, "nuc_pix"].iteritems():
             nuclei.append({"id": _id, "boundary": shapely.wkt.loads(nuc)})
 
         for ix, row in self._mdf[self._ix].iterrows():

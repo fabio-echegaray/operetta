@@ -252,8 +252,8 @@ class Montage:
             images = [exposure.equalize_hist(im) for im in images]
 
             for im, ch, title in zip(images, cfg_ch['ch'], cfg_ch['ChannelName']):
-                sp = i * 4 + ch
-                ax = fig.add_subplot(max_ch, 4, sp)
+                sp = i * max_ch + ch
+                ax = fig.add_subplot(4, max_ch, sp)
                 ax.imshow(im, extent=[0, w_um, h_um, 0], cmap='gray')
                 ax.set_xlim([0, w_um])
                 ax.set_ylim([0, h_um])
