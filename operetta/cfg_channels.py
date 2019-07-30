@@ -19,6 +19,9 @@ from .exceptions import ImagesFolderNotFound, NoSamplesError
 from . import Montage, ensure_dir, logger
 from gui.utils import canvas_to_pil
 
+pd.set_option('display.width', 320)
+pd.set_option('display.max_columns', 20)
+
 
 class ConfiguredChannels(Montage):
 
@@ -145,6 +148,7 @@ class ConfiguredChannels(Montage):
         return self._cfg
 
     def save_render(self, *args, **kwargs):
+        assert self.samples is not None, 'pandas samples file is needed to use this function'
         if len(args) == 1 and isinstance(args[0], int):
             _id = args[0]
             if not self.samples_are_well_formed():
@@ -160,60 +164,81 @@ class ConfiguredChannels(Montage):
             logger.warning("there's nothing to render")
             return
 
-        path = kwargs['path'] if 'path' in kwargs else None
-        max_width = kwargs['max_width'] if 'max_width' in kwargs else None
-        self._save_render_row_col_fid(row, col, fid, path=path, max_width=max_width)
-
-    def _save_render_row_col_fid(self, row, col, fid, path=None, max_width=50):
-        assert self.samples is not None, 'pandas samples file is needed to use this function'
         s = self.samples
         dfi = s[(s['row'] == row) & (s['col'] == col) & (s['fid'] == fid)]
-        # assert len(dfi) == 1, 'more than one sample'
 
         # create path where the images are going to be stored
-        if path is None:
+        if 'path' not in kwargs:
             basepath = os.path.dirname(self.images_path)
             basepath = os.path.abspath(os.path.join(basepath, 'out', 'render'))
         else:
-            basepath = os.path.abspath(path)
+            basepath = os.path.abspath(kwargs['path'])
 
-        # get images for render
         cfg_ch = self.configuration['channels']
-        images = self.max_projection(row, col, fid)
 
-        width, height = images[0].shape
-        w_um, h_um = [s * self.um_per_pix for s in images[0].shape]
-        frame = Polygon([(0, 0), (0, width), (height, width), (height, 0)])
-        frx, fry = frame.exterior.xy
-        out = np.zeros(images[0].shape + (3,), dtype=np.float64)
-
-        # ----------------------
-        #      OVERALL IMAGE
-        # ----------------------
+        # canvas for overall image
+        max_width = kwargs['max_width'] if 'max_width' in kwargs else None
         fig_general = Figure((max_width * 4 / 150, max_width * 4 / 150), dpi=150)
         canvas_g = FigureCanvas(fig_general)
-        axg = fig_general.gca()
+        # canvas for closeup image
+        fig_closeup = Figure((max_width / 150, max_width / 150), dpi=150)
+        canvas_c = FigureCanvas(fig_closeup)
+
+        for _ip, dpos in dfi.groupby('p'):
+            # get images for render
+            if _ip in ["max"]:  # ,"min","avg"]:
+                images = self.max_projection(row, col, fid)
+            else:
+                images = self.image(row, col, fid, _ip)
+
+            # ----------------------
+            #      BACKGROUND IMAGE
+            # ----------------------
+            background = np.zeros(images[0].shape + (3,), dtype=np.float64)
+            for ch in cfg_ch:
+                _img = images[ch['number']]
+                if ch['flatfield']:
+                    _img = self._flat_field_correct(_img, ch['number'])
+                _img = exposure.equalize_hist(_img)
+                _img = color.gray2rgb(_img)
+
+                for operation in ch['pipeline']:
+                    if operation == 'nucleus' and ch['render']:
+                        background += _img * p.colors.hoechst_33342 * ch['render intensity']
+                    if operation == 'cell' and ch['render']:
+                        background += _img * p.colors.alexa_488 * ch['render intensity']
+                    if operation == 'intensity_in_nucleus' and ch['render']:
+                        background += _img * p.colors.alexa_647 * ch['render intensity']
+                    if operation == 'ring_around_nucleus' and ch['render']:
+                        background += _img * p.colors.alexa_647 * ch['render intensity']
+                    if operation == 'particle_in_cytoplasm' and ch['render']:
+                        background += _img * p.colors.alexa_594 * ch['render intensity']
+
+            # ----------------------
+            #      RENDER GENERAL
+            # ----------------------
+            self._render_image(fig_general.gca(), dpos, background)
+            name = 'r%d-c%d-f%d-p%s.jpg' % (row, col, fid, _ip)
+            fpath = os.path.abspath(os.path.join(basepath, name))
+            pil = canvas_to_pil(canvas_g)
+            pil.save(ensure_dir(fpath))
+
+            # ----------------------
+            #      RENDER CLOSEUPS
+            # ----------------------
+            for ix, smp in dpos.groupby('id'):
+                self._render_image_closeup(fig_closeup.gca(), smp, background)
+                name = 'r%d-c%d-f%d-p%s-i%d.jpg' % (row, col, fid, _ip, ix)
+                fpath = os.path.abspath(os.path.join(basepath, name))
+                canvas_to_pil(canvas_c).save(ensure_dir(fpath))
+
+    def _render_image(self, axg, df_row, bkg_img):
+        w_um, h_um, _ = [s * self.um_per_pix for s in bkg_img.shape]
+        frame = Polygon([(0, 0), (0, w_um), (h_um, w_um), (h_um, 0)])
+        frx, fry = frame.exterior.xy
         axg.plot(frx, fry, color='red', linewidth=2, solid_capstyle='round', zorder=10)
-        for ch in cfg_ch:
-            _img = images[ch['number']]
-            if ch['flatfield']:
-                _img = self._flat_field_correct(_img, ch['number'])
-            _img = exposure.equalize_hist(_img)
-            _img = color.gray2rgb(_img)
 
-            for operation in ch['pipeline']:
-                if operation == 'nucleus' and ch['render']:
-                    out += _img * p.colors.hoechst_33342 * ch['render intensity']
-                if operation == 'cell' and ch['render']:
-                    out += _img * p.colors.alexa_488 * ch['render intensity']
-                if operation == 'intensity_in_nucleus' and ch['render']:
-                    out += _img * p.colors.alexa_647 * ch['render intensity']
-                if operation == 'ring_around_nucleus' and ch['render']:
-                    out += _img * p.colors.alexa_647 * ch['render intensity']
-                if operation == 'particle_in_cytoplasm' and ch['render']:
-                    out += _img * p.colors.alexa_594 * ch['render intensity']
-
-        for ix, smp in dfi.groupby('id'):
+        for ix, smp in df_row.groupby('id'):
             nucleus = shapely.wkt.loads(smp['nucleus'].iloc[0])
             cell = shapely.wkt.loads(smp['cell'].iloc[0]) if 'cell' in smp and not smp['cell'].isna().iloc[0] else None
 
@@ -225,67 +250,54 @@ class ConfiguredChannels(Montage):
                 centr = None
 
             p.render_cell(nucleus, cell, centr, base_zorder=20, ax=axg)
-            if 'ring' in smp:
+            if 'ring' in smp and not smp['ring'].isna().iloc[0]:
                 ring = shapely.wkt.loads(smp['ring'].iloc[0])
-                if ring.area == 0: continue
-                p.render_polygon(ring, zorder=10, ax=axg)
+                if ring.area > 0:
+                    p.render_polygon(ring, zorder=10, ax=axg)
             axg.text(nucleus.centroid.x + 2, nucleus.centroid.y - 1, ix, color='red', zorder=50)
 
         axg.plot([5, 5 + 10], [5, 5], c='w', lw=4)
         axg.text(5 + 1, 5 + 1.5, '10 um', color='w')
 
-        axg.imshow(out, extent=[0, w_um, h_um, 0])
+        axg.imshow(bkg_img, extent=[0, w_um, h_um, 0])
         axg.set_xlim([0, w_um])
         axg.set_ylim([0, h_um])
         axg.set_axis_on()
 
-        pil = canvas_to_pil(canvas_g)
-        name = 'r%d-c%d-f%d.jpg' % (row, col, fid)
-        fpath = os.path.abspath(os.path.join(basepath, name))
-        pil.save(ensure_dir(fpath))
-
-        # ----------------------
-        #     CLOSEUP RENDER
-        # ----------------------
-        fig_closeup = Figure((max_width / 150, max_width / 150), dpi=150)
-        canvas_c = FigureCanvas(fig_closeup)
-        axc = fig_closeup.gca()
+    def _render_image_closeup(self, axc, smp, bkg_img):
+        assert len(smp) == 1, 'only one sample allowed'
+        w_um, h_um, _ = [s * self.um_per_pix for s in bkg_img.shape]
+        axc.cla()
         axc.set_facecolor('xkcd:salmon')
-        for ix, smp in dfi.groupby('id'):
-            nucleus = shapely.wkt.loads(smp['nucleus'].values[0])
-            cell = shapely.wkt.loads(smp['cell'].iloc[0]) if 'cell' in smp and not smp['cell'].isna().iloc[0] else None
 
-            if 'c1' in smp and 'c2' in smp:
-                c1 = shapely.wkt.loads(smp['c1'].iloc[0])
-                c2 = shapely.wkt.loads(smp['c2'].iloc[0])
-                centr = [c1, c2]
-            else:
-                centr = None
+        nucleus = shapely.wkt.loads(smp['nucleus'].iloc[0])
+        cell = shapely.wkt.loads(smp['cell'].iloc[0]) if 'cell' in smp and not smp['cell'].isna().iloc[0] else None
 
-            # render and save closeup image
-            axc.cla()
-            p.render_cell(nucleus, cell, centr, base_zorder=20, ax=axc)
-            if 'ring' in smp:
-                ring = shapely.wkt.loads(smp['ring'].iloc[0])
-                if ring.area == 0: continue
+        if 'c1' in smp and 'c2' in smp:
+            c1 = shapely.wkt.loads(smp['c1'].iloc[0])
+            c2 = shapely.wkt.loads(smp['c2'].iloc[0])
+            centr = [c1, c2]
+        else:
+            centr = None
+
+        # render and save closeup image
+        p.render_cell(nucleus, cell, centr, base_zorder=20, ax=axc)
+        if 'ring' in smp and not smp['ring'].isna().iloc[0]:
+            ring = shapely.wkt.loads(smp['ring'].iloc[0])
+            if ring.area > 0:
                 p.render_polygon(ring, zorder=10, ax=axc)
-            _m = 30
-            x0, xf = nucleus.centroid.x - _m, nucleus.centroid.x + _m
-            y0, yf = nucleus.centroid.y - _m, nucleus.centroid.y + _m
-            if x0 < 0: xf -= x0
-            if y0 < 0: yf -= y0
-            axc.imshow(out, extent=[0, w_um, h_um, 0])
-            axc.set_xlim(x0, xf)
-            axc.set_ylim(y0, yf)
-            axc.plot([x0 + 5, x0 + 15], [y0 + 5, y0 + 5], c='w', lw=4)
-            axc.text(x0 + 5, y0 + 7, '10 um', color='w', zorder=50)
-            if "cluster" in smp:
-                axc.text(nucleus.centroid.x, nucleus.centroid.y, smp["cluster"].iloc[0], color='w', zorder=10)
-
-            pil = canvas_to_pil(canvas_c)
-            name = 'r%d-c%d-f%d-i%d.jpg' % (row, col, fid, ix)
-            fpath = os.path.abspath(os.path.join(basepath, name))
-            pil.save(ensure_dir(fpath))
+        _m = 30
+        x0, xf = nucleus.centroid.x - _m, nucleus.centroid.x + _m
+        y0, yf = nucleus.centroid.y - _m, nucleus.centroid.y + _m
+        if x0 < 0: xf -= x0
+        if y0 < 0: yf -= y0
+        axc.imshow(bkg_img, extent=[0, w_um, h_um, 0])
+        axc.set_xlim(x0, xf)
+        axc.set_ylim(y0, yf)
+        axc.plot([x0 + 5, x0 + 15], [y0 + 5, y0 + 5], c='w', lw=4)
+        axc.text(x0 + 5, y0 + 7, '10 um', color='w', zorder=50)
+        if "cluster" in smp:
+            axc.text(nucleus.centroid.x, nucleus.centroid.y, smp["cluster"].iloc[0], color='w', zorder=10)
 
     def _exec_op(self, img, op, cfg_row):
         img = img[cfg_row['number'].iloc[0]]
@@ -313,7 +325,7 @@ class ConfiguredChannels(Montage):
             logger.info("Processing each image in the stack individually.")
             gr = self.files[(self.files['row'] == row) & (self.files['col'] == col) & (self.files['fid'] == fid)]
             for zp, z in gr.groupby('p'):  # iterate over z positions
-                logger.debug("Z stack %d:" % zp)
+                logger.debug("Z stack %s" % zp)
                 self._zp = zp
                 img = self.image(row, col, fid, zp)
                 self._exec_op(img, op, configuration_row)
@@ -348,6 +360,7 @@ class ConfiguredChannels(Montage):
     def _measure_row_col_fid(self, row, col, fid):
         cfg_ch = self.configuration['channels']
         cfg = pd.DataFrame(cfg_ch)
+        self._mdf = pd.DataFrame()
         # NOTE: all the extraction process and validation is done on the pixel space, and the final dataframe is in [um]
 
         # --------------------
@@ -357,7 +370,6 @@ class ConfiguredChannels(Montage):
         assert len(c) > 0, 'nuclei finding step needed in configuration'
         assert len(c) < 2, 'only one nuclei finding step per batch allowed'
         self._stack_operation(row, col, fid, c, self._measure_nuclei)
-        assert len(self._nuclei_pix) > 0, "nuclei were not stored correctly"
 
         # --------------------
         #     Find cells
@@ -367,7 +379,6 @@ class ConfiguredChannels(Montage):
         assert len(c) < 2, 'only one cell finding step per batch allowed'
         if len(c) == 1:
             self._stack_operation(row, col, fid, c, self._measure_cells)
-            assert len(self._cells_pix) > 0, "no cell boudaries were found"
 
         # --------------------
         #     Intensity in nucleus
@@ -398,14 +409,14 @@ class ConfiguredChannels(Montage):
         return self._mdf
 
     def _measure_nuclei(self, nuclei_img, cfg, r=10):
-        imgseg, self._nuclei_pix = m.nuclei_segmentation(nuclei_img, radius=r * self.pix_per_um)
-        self._nuclei_pix = m.exclude_contained(self._nuclei_pix)
+        imgseg, nuclei = m.nuclei_segmentation(nuclei_img, radius=r * self.pix_per_um)
+        nuclei = m.exclude_contained(nuclei)
 
-        if len(self._nuclei_pix) == 0:
+        if len(nuclei) == 0:
             logger.warning("Couldn't find nuclei in image.")
             return
 
-        for nucleus in self._nuclei_pix:
+        for nucleus in nuclei:
             nucl_bnd = nucleus['boundary']
             dna_int = m.integral_over_surface(nuclei_img, nucl_bnd)
 
@@ -422,10 +433,10 @@ class ConfiguredChannels(Montage):
                 'dna_int': [dna_int],
                 'dna_dens': [dna_int / nucl_bnd.area],
                 'nucleus': n_bum.wkt,
-                # 'nuc_pix': nucl_bnd.wkt,
+                'nuc_pix': nucl_bnd.wkt,
             })
             self._mdf = self._mdf.append(d, ignore_index=True, sort=False)
-        logger.debug("%d nuclei found in image" % len(self._nuclei_pix))
+        logger.debug("%d nuclei found in image" % len(nuclei))
 
         return self._mdf.index
 
@@ -433,24 +444,26 @@ class ConfiguredChannels(Montage):
         assert self._ix.any(), "no rows in the filtered dataframe"
         # generate an image based on nuclei found previously
         nuclei_img = np.zeros(cell_img.shape, dtype=np.bool)
-        for nuc in self._nuclei_pix:
+        nuclei = list()
+        for _id, nuc in self._mdf.set_index("id").loc[self._ix, "nuc_pix"]:
             _nimg = m.generate_mask_from(nuc, cell_img.shape)
             nuclei_img = nuclei_img | _nimg
-        self._cells_pix, cells_mask = m.cell_boundary(cell_img, nuclei_img)
+            nuclei.append({"id": _id, "boundary": shapely.wkt.loads(nuc)})
+        cells, cells_mask = m.cell_boundary(cell_img, nuclei_img)
 
         #  filter polygons contained in others
-        self._cells_pix = m.exclude_contained(self._cells_pix)
-        logger.debug("%d cells found in image" % len(self._cells_pix))
+        cells = m.exclude_contained(cells)
+        logger.debug("%d cells found in image" % len(cells))
 
         width, height = cell_img.shape
         frame = Polygon([(0, 0), (0, height), (width, height), (width, 0)])
         touching_fr = too_big = no_nuclei = two_nuclei = 0
         # iterate through all cells
-        for cl in self._cells_pix:
+        for cl in cells:
             logger.debug("processing cell id %d" % cl['id'])
             cell_bnd = cl['boundary']
-            for nucleus in self._nuclei_pix:
-                valid_sample, reason = m.is_valid_sample(frame, cell_bnd, nucleus, self._nuclei_pix)
+            for _id, nucleus in self._mdf.loc[self._ix, "nuc_pix"]:
+                valid_sample, reason = m.is_valid_sample(frame, cell_bnd, nucleus, nuclei)
                 if reason == m.REJECTION_TOUCHING_FRAME: touching_fr += 1
                 if reason == m.REJECTION_NO_NUCLEUS: no_nuclei += 1
                 if reason == m.REJECTION_TWO_NUCLEI: two_nuclei += 1
@@ -473,7 +486,7 @@ class ConfiguredChannels(Montage):
                     self._mdf.loc[ix, 'tubulin_int'] = tubulin_int
                     self._mdf.loc[ix, 'tubulin_dens'] = tubulin_int / cell_bnd.area
                     self._mdf.loc[ix, 'cell'] = c_bum.wkt
-                    # self._mdf.loc[ix, 'cell_pix'] = cell_bnd.wkt
+                    self._mdf.loc[ix, 'cell_pix'] = cell_bnd.wkt
 
         logger.info("%d samples rejected because they were touching the frame" % touching_fr)
         logger.info("%d samples rejected because cell didn't have a nucleus" % no_nuclei)
@@ -487,109 +500,116 @@ class ConfiguredChannels(Montage):
         width, height = image.shape
         frame = Polygon([(0, 0), (0, height), (width, height), (width, 0)])
 
-        for cl in self._cells_pix:
-            logger.debug("intensity_in_nucleus for cell id %d" % cl['id'])
-            cell_bnd = cl['boundary']
-            for nucleus in self._nuclei_pix:
-                nucl_bnd = nucleus['boundary']
-                valid_sample, reason = m.is_valid_sample(frame, cell_bnd, nucl_bnd, self._nuclei_pix)
-                if not valid_sample: continue
-                signal_int = m.integral_over_surface(image, nucl_bnd)
-                signal_density = signal_int / nucl_bnd.area
+        nuclei = list()
+        for _id, nuc in self._mdf.set_index("id").loc[self._ix, "nuc_pix"]:
+            nuclei.append({"id": _id, "boundary": shapely.wkt.loads(nuc)})
 
-                # TODO: scale intensity from pixels^2 to um^2
-                ix = self._ix & (self._mdf['id'] == nucleus['id'])
-                self._mdf.loc[ix, '%s_int' % self._mdf['tag']] = signal_int
-                self._mdf.loc[ix, '%s_dens' % self._mdf['tag']] = signal_density
+        for ix, row in self._mdf[self._ix].iterrows():
+            id = row["id"]
+            nucl_bnd = shapely.wkt.loads(row["nuc_pix"])
+            cell_bnd = shapely.wkt.loads(row["cell_pix"])
+
+            valid_sample, reason = m.is_valid_sample(frame, cell_bnd, nucl_bnd, nuclei)
+            if not valid_sample: continue
+            logger.debug("intensity_in_nucleus for cell id %d" % id)
+            signal_int = m.integral_over_surface(image, nucl_bnd)
+            signal_density = signal_int / nucl_bnd.area
+
+            # TODO: scale intensity from pixels^2 to um^2
+            self._mdf.loc[ix, '%s_int' % cfg['tag'].iloc[0]] = signal_int
+            self._mdf.loc[ix, '%s_dens' % cfg['tag'].iloc[0]] = signal_density
 
     def _measure_ring_intensity_around_nucleus(self, image, cfg):
         assert self._ix.any(), "no rows in the filtered dataframe"
-        for nucleus in self._nuclei_pix:
-            nucl_bnd = nucleus['boundary']
+        for ix, row in self._mdf[self._ix].iterrows():
+            nucl_bnd = shapely.wkt.loads(row["nuc_pix"])
             thickness = float(cfg['rng_thickness'])
             thickness *= self.pix_per_um
             rng_bnd = nucl_bnd.buffer(thickness).difference(nucl_bnd)
             if rng_bnd.area > 0:
                 rng_int = m.integral_over_surface(image, rng_bnd)
+                if np.isnan(rng_int): continue
                 rng_density = rng_int / rng_bnd.area
             else:
                 logger.warning("Ring polygon with no area!\r\nThickness of ring set to %.2f [pix]" % thickness)
-                rng_int = 0
-                rng_density = 0
+                continue
 
             logger.debug("ring_around_nucleus on tag '%s' for nucleus id %d = %s" % (
-                cfg['tag'].iloc[0], nucleus['id'], m.eng_string(rng_int, si=True, format='%.2f')))
+                cfg['tag'].iloc[0], row['id'], m.eng_string(rng_int, si=True, format='%.2f')))
             rng_um = affinity.scale(rng_bnd, xfact=self.um_per_pix, yfact=self.um_per_pix, origin=(0, 0, 0))
 
             # TODO: scale intensity from pixels^2 to um^2
-            ix = self._ix & (self._mdf['id'] == nucleus['id'])
             self._mdf.loc[ix, 'ring'] = rng_um.wkt
-            self._mdf.loc[ix, '%s_rng_int' % cfg['tag']] = rng_int
-            self._mdf.loc[ix, '%s_rng_dens' % cfg['tag']] = rng_density
+            self._mdf.loc[ix, '%s_rng_int' % cfg['tag'].iloc[0]] = rng_int
+            self._mdf.loc[ix, '%s_rng_dens' % cfg['tag'].iloc[0]] = rng_density
+            # logger.debug("\r\n" + str(self._mdf[ix]))
 
     def _measure_particle_in_cytoplasm(self, image, cfg):
         assert self._ix.any(), "no rows in the filtered dataframe"
         width, height = image.shape
         frame = Polygon([(0, 0), (0, height), (width, height), (width, 0)])
 
-        for cl in self._cells_pix:
-            logger.debug("particle_in_cytoplasm for cell id %d" % cl['id'])
-            cell_bnd = cl['boundary']
-            for nucleus in self._nuclei_pix:
-                nucl_bnd = nucleus['boundary']
-                x0, y0, xf, yf = [int(u) for u in nucleus['boundary'].bounds]
+        nuclei = list()
+        for _id, nuc in self._mdf.set_index("id").loc[self._ix, "nuc_pix"]:
+            nuclei.append({"id": _id, "boundary": shapely.wkt.loads(nuc)})
 
-                valid_sample, reason = m.is_valid_sample(frame, cell_bnd, nucl_bnd, self._nuclei_pix)
-                if not valid_sample: continue
+        for ix, row in self._mdf[self._ix].iterrows():
+            id = row["id"]
+            nucl_bnd = shapely.wkt.loads(row["nuc_pix"])
+            cell_bnd = shapely.wkt.loads(row["cell_pix"])
+            x0, y0, xf, yf = [int(u) for u in nucl_bnd.bounds]
 
-                centr_crop = image[y0:yf, x0:xf]
-                logger.info('applying centrosome algorithm for nuclei %d' % nucleus['id'])
+            valid_sample, reason = m.is_valid_sample(frame, cell_bnd, nucl_bnd, nuclei)
+            if not valid_sample: continue
+            logger.debug("particle_in_cytoplasm for cell id %d" % id)
 
-                # convert everything to um space for dataframe construction
-                n_bum = affinity.scale(nucl_bnd, xfact=self.um_per_pix, yfact=self.um_per_pix, origin=(0, 0, 0))
-                c_bum = affinity.scale(cell_bnd, xfact=self.um_per_pix, yfact=self.um_per_pix, origin=(0, 0, 0))
+            centr_crop = image[y0:yf, x0:xf]
+            logger.info('applying centrosome algorithm for nuclei %d' % id)
 
-                cntr = m.centrosomes(centr_crop, min_size=0.2 * self.pix_per_um,
-                                     max_size=0.5 * self.pix_per_um,
-                                     threshold=0.01)
-                cntr[:, 0] += x0
-                cntr[:, 1] += y0
-                cntrsmes = list()
-                for k, c in enumerate(cntr):
-                    pt = Point(c[0], c[1])
-                    pti = m.integral_over_surface(image, pt.buffer(1 * self.pix_per_um))
-                    cntrsmes.append(
-                        {'id': k, 'pt': Point(c[0] / self.pix_per_um, c[1] / self.pix_per_um), 'i': pti})
-                    cntrsmes = sorted(cntrsmes, key=lambda ki: ki['i'], reverse=True)
+            # load boundaries of um space for dataframe construction
+            n_bum = shapely.wkt.loads(row["nucleus"])
+            c_bum = shapely.wkt.loads(row["cell"])
 
-                logger.debug('found {:d} centrosomes'.format(len(cntrsmes)))
+            cntr = m.centrosomes(centr_crop, min_size=0.2 * self.pix_per_um,
+                                 max_size=0.5 * self.pix_per_um,
+                                 threshold=0.01)
+            cntr[:, 0] += x0
+            cntr[:, 1] += y0
+            cntrsmes = list()
+            for k, c in enumerate(cntr):
+                pt = Point(c[0], c[1])
+                pti = m.integral_over_surface(image, pt.buffer(1 * self.pix_per_um))
+                cntrsmes.append(
+                    {'id': k, 'pt': Point(c[0] / self.pix_per_um, c[1] / self.pix_per_um), 'i': pti})
+                cntrsmes = sorted(cntrsmes, key=lambda ki: ki['i'], reverse=True)
 
-                twocntr = len(cntrsmes) >= 2
-                c1 = cntrsmes[0] if len(cntrsmes) > 0 else None
-                c2 = cntrsmes[1] if twocntr else None
+            logger.debug('found {:d} centrosomes'.format(len(cntrsmes)))
 
-                lc = 2 if c2 is not None else 1 if c1 is not None else np.nan
-                # TODO: Add units support
-                ix = self._ix & (self._mdf['id'] == nucleus['id'])
-                self._mdf.loc[ix, 'centrosomes'] = lc
-                self._mdf.loc[ix, 'c1'] = c1['pt'].wkt if c1 is not None else None
-                self._mdf.loc[ix, 'c2'] = c2['pt'].wkt if c2 is not None else None
-                self._mdf.loc[ix, 'c1_int'] = c1['i'] if c1 is not None else np.nan
-                self._mdf.loc[ix, 'c2_int'] = c2['i'] if c2 is not None else np.nan
-                self._mdf.loc[ix, 'c1_d_nuc_centr'] = n_bum.centroid.distance(
-                    c1['pt']) if c1 is not None else np.nan
-                self._mdf.loc[ix, 'c2_d_nuc_centr'] = n_bum.centroid.distance(c2['pt']) if twocntr else np.nan
-                self._mdf.loc[ix, 'c1_d_nuc_bound'] = n_bum.exterior.distance(
-                    c1['pt']) if c1 is not None else np.nan
-                self._mdf.loc[ix, 'c2_d_nuc_bound'] = n_bum.exterior.distance(c2['pt']) if twocntr else np.nan
-                self._mdf.loc[ix, 'c1_d_cell_centr'] = c_bum.centroid.distance(
-                    c1['pt']) if c1 is not None else np.nan
-                self._mdf.loc[ix, 'c2_d_cell_centr'] = c_bum.centroid.distance(c2['pt']) if twocntr else np.nan
-                self._mdf.loc[ix, 'c1_d_cell_bound'] = c_bum.exterior.distance(
-                    c1['pt']) if c1 is not None else np.nan
-                self._mdf.loc[ix, 'c2_d_cell_bound'] = c_bum.exterior.distance(c2['pt']) if twocntr else np.nan
-                self._mdf.loc[ix, 'nuc_centr_d_cell_centr'] = n_bum.centroid.distance(c_bum.centroid)
-                self._mdf.loc[ix, 'c1_d_c2'] = c1['pt'].distance(c2['pt']) if twocntr else np.nan
+            twocntr = len(cntrsmes) >= 2
+            c1 = cntrsmes[0] if len(cntrsmes) > 0 else None
+            c2 = cntrsmes[1] if twocntr else None
+
+            lc = 2 if c2 is not None else 1 if c1 is not None else np.nan
+            # TODO: Add units support
+            self._mdf.loc[ix, 'centrosomes'] = lc
+            self._mdf.loc[ix, 'c1'] = c1['pt'].wkt if c1 is not None else None
+            self._mdf.loc[ix, 'c2'] = c2['pt'].wkt if c2 is not None else None
+            self._mdf.loc[ix, 'c1_int'] = c1['i'] if c1 is not None else np.nan
+            self._mdf.loc[ix, 'c2_int'] = c2['i'] if c2 is not None else np.nan
+            self._mdf.loc[ix, 'c1_d_nuc_centr'] = n_bum.centroid.distance(
+                c1['pt']) if c1 is not None else np.nan
+            self._mdf.loc[ix, 'c2_d_nuc_centr'] = n_bum.centroid.distance(c2['pt']) if twocntr else np.nan
+            self._mdf.loc[ix, 'c1_d_nuc_bound'] = n_bum.exterior.distance(
+                c1['pt']) if c1 is not None else np.nan
+            self._mdf.loc[ix, 'c2_d_nuc_bound'] = n_bum.exterior.distance(c2['pt']) if twocntr else np.nan
+            self._mdf.loc[ix, 'c1_d_cell_centr'] = c_bum.centroid.distance(
+                c1['pt']) if c1 is not None else np.nan
+            self._mdf.loc[ix, 'c2_d_cell_centr'] = c_bum.centroid.distance(c2['pt']) if twocntr else np.nan
+            self._mdf.loc[ix, 'c1_d_cell_bound'] = c_bum.exterior.distance(
+                c1['pt']) if c1 is not None else np.nan
+            self._mdf.loc[ix, 'c2_d_cell_bound'] = c_bum.exterior.distance(c2['pt']) if twocntr else np.nan
+            self._mdf.loc[ix, 'nuc_centr_d_cell_centr'] = n_bum.centroid.distance(c_bum.centroid)
+            self._mdf.loc[ix, 'c1_d_c2'] = c1['pt'].distance(c2['pt']) if twocntr else np.nan
 
         # if len(self._mdf) > 0:
         #     # Compute SNR: Step 1. Calculate standard deviation of background
