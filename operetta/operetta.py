@@ -101,9 +101,9 @@ class Montage:
         return float(pix_per_um[0])
 
     def stack_generator(self):
-        l = len(self.files_gr)
+        m = len(self.files_gr)
         for ig, g in self.files_gr.iterrows():
-            logger.info('stack generator:  %d of %d - row=%d col=%d fid=%d' % (ig + 1, l, g['row'], g['col'], g['fid']))
+            logger.info('stack generator:  %d of %d - row=%d col=%d fid=%d' % (ig + 1, m, g['row'], g['col'], g['fid']))
             yield g['row'], g['col'], g['fid']
 
     def add_mesurement(self, row, col, f, name, value):
@@ -111,10 +111,10 @@ class Montage:
 
     def max_projection(self, *args):
         if len(args) == 1 and isinstance(args[0], int):
-            id = args[0]
-            r = self.files_gr.ix[id - 1]
+            _id = args[0]
+            r = self.files_gr.ix[_id - 1]
             row, col, fid = r['row'], r['col'], r['fid']
-            logger.debug('retrieving image id=%d row=%d col=%d fid=%d' % (id, row, col, fid))
+            logger.debug('retrieving image id=%d row=%d col=%d fid=%d' % (_id, row, col, fid))
             return self._max_projection_row_col_fid(row, col, fid)
 
         elif len(args) == 3 and np.all([np.issubdtype(type(a), np.integer) for a in args]):
@@ -173,16 +173,15 @@ class Montage:
         e = xml.etree.ElementTree.parse(os.path.join(images_path, 'Index.idx.xml')).getroot()
         ims = e.find('d:Images', ns).findall('d:Image', ns)
         list_of_dicts_of_img = [{x.tag.replace('{%s}' % ns['d'], ''): x.text for x in im} for im in ims]
-        f = (
-            pd.DataFrame(list_of_dicts_of_img)
-                .rename(index=str,
-                        columns={"Row": "row", "Col": "col", "FieldID": "fid", "PlaneID": "p", "TimepointID": "tid",
-                                 "ChannelID": "ch", "FlimID": "fl", "URL": "filename", })
-                .drop(['AbsPositionZ', 'AbsTime', 'AcquisitionType', 'BinningX', 'BinningY', 'CameraType',
-                       'ChannelType', 'ExposureTime', 'IlluminationType', 'ImageSizeX', 'ImageSizeY', 'ImageType',
-                       'MainEmissionWavelength', 'MainExcitationWavelength', 'MaxIntensity', 'MeasurementTimeOffset',
-                       'OrientationMatrix', 'PositionX', 'PositionY', 'PositionZ', 'State'], axis=1)
-        )
+        f = (pd.DataFrame(list_of_dicts_of_img)
+             .rename(index=str, columns={"Row": "row", "Col": "col", "FieldID": "fid",
+                                         "PlaneID": "p", "TimepointID": "tid",
+                                         "ChannelID": "ch", "FlimID": "fl", "URL": "filename", })
+             .drop(['AbsPositionZ', 'AbsTime', 'AcquisitionType', 'BinningX', 'BinningY', 'CameraType',
+                    'ChannelType', 'ExposureTime', 'IlluminationType', 'ImageSizeX', 'ImageSizeY', 'ImageType',
+                    'MainEmissionWavelength', 'MainExcitationWavelength', 'MaxIntensity', 'MeasurementTimeOffset',
+                    'OrientationMatrix', 'PositionX', 'PositionY', 'PositionZ', 'State'], axis=1)
+             )
 
         assert (f['ImageResolutionX'] == f['ImageResolutionY']).all(), 'some pixels are not square'
 
@@ -270,11 +269,11 @@ class Montage:
                 ext = filename.split('.')[-1]
                 if ext == 'xml':
                     e = xml.etree.ElementTree.parse(os.path.join(root, filename)).getroot()
-                    map = [i for i in e if i.tag[-3:] == 'Map'][0]
+                    _map = [i for i in e if i.tag[-3:] == 'Map'][0]
 
                     self.flatfield_profiles = list()
                     regex = re.compile(r"([a-zA-Z]+[ ]?[0-9]*)")
-                    for p in map:
+                    for p in _map:
                         for ffp in p:
                             txt = ffp.text
                             txt = regex.sub(r'"\1"', txt)
