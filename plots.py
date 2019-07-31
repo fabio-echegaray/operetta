@@ -1,3 +1,5 @@
+import ast
+
 import matplotlib
 import matplotlib.pyplot as plt
 from matplotlib.path import Path
@@ -127,3 +129,13 @@ def render_polygon(polygon: Polygon, zorder=0, ax=None):
 
     ax.add_patch(patch)
     ax.set_aspect(1.0)
+
+
+def histogram_of_every_row(df, counts_col="_hist_counts", edges_col="_hist_edges", ax=None):
+    if ax is None:
+        ax = plt.gca()
+
+    for _d in df.iterrows():
+        counts = ast.literal_eval(_d[counts_col])
+        edges = ast.literal_eval(_d[edges_col])
+        plt.hist(edges[:-1], edges, weights=counts, alpha=1. / len(df), ax=ax)

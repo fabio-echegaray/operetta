@@ -93,6 +93,10 @@ class ConfiguredChannels(Montage):
                             'tag': config.get(section, 'tag'),
                             'pipeline': ast.literal_eval(config.get(section, 'pipeline')),
                             'rng_thickness': config.getfloat(section, 'rng_thickness', fallback=0),
+                            'hist_bins': config.getint(section, 'hist_bins', fallback=10),
+                            'hist_min': config.getint(section, 'hist_min', fallback=0),
+                            'hist_max': config.getint(section, 'hist_max', fallback=np.iinfo(np.uint16).max),
+                            'hist_log': config.getboolean(section, 'hist_log', fallback=False),
                             'render': config.getboolean(section, 'render'),
                             'render intensity': config.getfloat(section, 'render intensity'),
                             'flatfield': config.getboolean(section, 'flat field correction')
@@ -104,16 +108,24 @@ class ConfiguredChannels(Montage):
             config = configparser.RawConfigParser(allow_no_value=True)
             config.add_section('Information')
             config.set('Information', '#')
-            config.set('Information', '# allowed functions for the pipeline are: nucleus, cell, '
-                                      'intensity_in_nucleus, ring_around_nucleus, particle_in_cytoplasm')
+            config.set('Information', '# allowed functions for the pipeline are: nucleus, cell, histogram, ')
+            config.set('Information', '#        intensity_in_nucleus, ring_around_nucleus, particle_in_cytoplasm')
+            config.set('Information', '#')
             config.set('Information', '#')
             config.set('Information', '# Accepted parameters:')
-            config.set('Information', '#     for z_stack_aggregation:')
+            config.set('Information', '#     for z_stack_aggregation on every Channel: Aggregation op to do on ')
+            config.set('Information', '#     the z-stack. Can be one of the following:')
             config.set('Information', '#         use each image individually')
             config.set('Information', '#         do a max projection')
             config.set('Information', '#')
             config.set('Information', '#     for ring_around_nucleus:')
             config.set('Information', '#         rng_thickness: Thickness of the ring, in um.')
+            config.set('Information', '#')
+            config.set('Information', '#     for histogram:')
+            config.set('Information', '#         hist_bins: Number of bins to use.')
+            config.set('Information', '#         hist_min: Lower boundary for bins.')
+            config.set('Information', '#         hist_max: Upper boundary for bins.')
+            config.set('Information', '#         hist_log: Makes bin to look equally sized on a log scale.')
             config.set('Information', '#')
             config.set('Information', '#')
 
@@ -126,7 +138,12 @@ class ConfiguredChannels(Montage):
                 config.add_section(section)
                 config.set(section, 'number', c - 1)
                 config.set(section, 'channel name', self.files.loc[self.files['ch'] == c, 'ChannelName'].iloc[0])
-                config.set(section, 'z_stack_aggregation', 'use each image individually')
+                config.set(section, 'z_stack_aggregation', 'do a max projection')
+                config.set(section, 'rng_thickness', 3)
+                config.set(section, 'hist_bins', 100)
+                config.set(section, 'hist_min', 0)
+                config.set(section, 'hist_max', np.iinfo(np.uint16).max)
+                config.set(section, 'hist_log', True)
                 config.set(section, 'tag', 'default')
                 config.set(section, 'pipeline', [])
                 config.set(section, 'render', False)
@@ -402,6 +419,13 @@ class ConfiguredChannels(Montage):
         if len(c) == 1:
             assert self.cells_measured, 'particle_in_cytoplasm needs cell data'
 
+        # --------------------
+        #     Histogram
+        # --------------------
+        c = cfg[cfg['pipeline'].apply(lambda l: 'histogram' in l)]
+        for _, cf in c.iterrows():
+            self._stack_operation(row, col, fid, c, self._measure_histogram)
+
         return self._mdf
 
     def _measure_nuclei(self, nuclei_img, cfg, r=10):
@@ -609,3 +633,31 @@ class ConfiguredChannels(Montage):
         #     # u_pericentrin = np.mean(_img[cells_mask])
         #     self._mdf['snr_c1'] = self._mdf['c1_int'].apply(lambda i: i / std_pericentrin if not np.isnan(i) else np.nan)
         #     self._mdf['snr_c2'] = self._mdf['c2_int'].apply(lambda i: i / std_pericentrin if not np.isnan(i) else np.nan)
+
+    def _measure_histogram(self, image, cfg):
+        n_bins = cfg['hist_bins'].iloc[0]
+        min = cfg['hist_min'].iloc[0]
+        max = cfg['hist_max'].iloc[0]
+        tag = cfg['tag'].iloc[0]
+        log_bins = cfg['hist_log'].iloc[0]
+        if log_bins:
+            bins = np.logspace(np.log10(1 if min == 0 else min), np.log10(max), n_bins)
+        else:
+            bins = np.linspace(min, max, n_bins)
+        histogram, edges = np.histogram(image.ravel(), bins)
+
+        if self._ix.any():
+            self._mdf.loc[self._ix, '%s_hist' % tag] = np.array2string(histogram.astype(int), separator=',')
+            self._mdf.loc[self._ix, '%s_hist_edges' % tag] = np.array2string(edges, precision=2, separator=',',
+                                                                             suppress_small=True)
+        else:
+            d = pd.DataFrame(data={
+                'id': [None],
+                'row': [self._row],
+                'col': [self._col],
+                'fid': [self._fid],
+                'p': [self._zp],
+                '%s_hist_counts' % tag: [np.array2string(histogram.astype(int), separator=',')],
+                '%s_hist_edges' % tag: [np.array2string(edges, precision=2, separator=',', suppress_small=True)],
+            })
+            self._mdf = self._mdf.append(d, ignore_index=True, sort=False)
