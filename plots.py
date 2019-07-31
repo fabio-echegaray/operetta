@@ -1,8 +1,14 @@
+import matplotlib
 import matplotlib.pyplot as plt
-import shapely.geometry
+from matplotlib.path import Path
+from matplotlib.patches import PathPatch
+from shapely.geometry import Polygon
 from matplotlib.ticker import EngFormatter
 import numpy as np
 import matplotlib.colors as mcolors
+from numpy import asarray, concatenate, ones
+
+matplotlib.rcParams['hatch.linewidth'] = 0.1
 
 
 class colors():
@@ -53,33 +59,71 @@ def facs(df, ax=None, xlim=None, ylim=None, color=None):
     ax.set_aspect('equal')
 
 
-def render_cell(nucleus, cell, centrosomes, ax=None):
+def render_cell(nucleus, cell, centrosomes, base_zorder=0, ax=None):
     if ax is None:
         ax = plt.gca()
 
     x, y = nucleus.exterior.xy
     cen = nucleus.centroid
-    ax.plot(x, y, color='red', linewidth=1, solid_capstyle='round', zorder=2)
-    ax.plot(cen.x, cen.y, color='red', marker='+', linewidth=1, solid_capstyle='round', zorder=2)
+    ax.plot(x, y, color='red', linewidth=1, solid_capstyle='round', zorder=base_zorder + 2)
+    ax.plot(cen.x, cen.y, color='red', marker='+', linewidth=1, solid_capstyle='round', zorder=base_zorder + 2)
 
     if cell is not None:
         x, y = cell.exterior.xy
-        ax.plot(x, y, color='yellow', linewidth=1, solid_capstyle='round', zorder=1)
+        ax.plot(x, y, color='yellow', linewidth=1, solid_capstyle='round', zorder=base_zorder + 1)
         cenc = cell.centroid
-        ax.plot(cenc.x, cenc.y, color='yellow', marker='+', linewidth=1, solid_capstyle='round', zorder=2)
+        ax.plot(cenc.x, cenc.y, color='yellow', marker='+', linewidth=1, solid_capstyle='round', zorder=base_zorder + 2)
 
     if centrosomes is not None:
         c1, c2 = centrosomes
         if c1 is not None:
             c = plt.Circle((c1.x, c1.y), radius=2, facecolor='none', edgecolor=colors.sussex_coral_red,
-                           linewidth=2, zorder=5)
+                           linewidth=2, zorder=base_zorder + 5)
             ax.add_artist(c)
-            ax.plot([c1.x, cen.x], [c1.y, cen.y], color='gray', linewidth=1, zorder=2)
-            # ax.text(c1.x, c1.y, '%0.2f' % (c1.distance(cen)), color='w', zorder=10)
+            ax.plot([c1.x, cen.x], [c1.y, cen.y], color='gray', linewidth=1, zorder=base_zorder + 2)
+            # ax.text(c1.x, c1.y, '%0.2f' % (c1.distance(cen)), color='w', zorder=base_zorder+10)
         if c2 is not None:
             c = plt.Circle((c2.x, c2.y), radius=2, facecolor='none', edgecolor=colors.sussex_navy_blue,
-                           linewidth=2, zorder=5)
+                           linewidth=2, zorder=base_zorder + 5)
             ax.add_artist(c)
 
     ax.set_aspect('equal')
     ax.set_axis_off()
+
+
+def render_polygon(polygon: Polygon, zorder=0, ax=None):
+    """
+        These next two functions are taken from Sean Gillies
+        https://sgillies.net/2010/04/06/painting-punctured-polygons-with-matplotlib.html
+    """
+
+    def ring_coding(ob):
+        # The codes will be all "LINETO" commands, except for "MOVETO"s at the
+        # beginning of each subpath
+        n = len(ob.coords)
+        codes = ones(n, dtype=Path.code_type) * Path.LINETO
+        codes[0] = Path.MOVETO
+        return codes
+
+    def pathify(polygon):
+        # Convert coordinates to path vertices. Objects produced by Shapely's
+        # analytic methods have the proper coordinate order, no need to sort.
+        vertices = concatenate(
+            [asarray(polygon.exterior)]
+            + [asarray(r) for r in polygon.interiors])
+        codes = concatenate(
+            [ring_coding(polygon.exterior)]
+            + [ring_coding(r) for r in polygon.interiors])
+        return Path(vertices, codes)
+
+    if ax is None:
+        ax = plt.gca()
+
+    x, y = polygon.exterior.xy
+    ax.plot(x, y, color='white', linewidth=0.5, solid_capstyle='round', zorder=zorder)
+
+    path = pathify(polygon)
+    patch = PathPatch(path, facecolor='none', edgecolor='white', hatch='/////', lw=0.01, zorder=zorder)
+
+    ax.add_patch(patch)
+    ax.set_aspect(1.0)
