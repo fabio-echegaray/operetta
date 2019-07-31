@@ -2,9 +2,8 @@ import os
 import xml.etree.ElementTree
 import json
 import re
-import matplotlib
 
-matplotlib.use("agg")
+import matplotlib
 import numpy as np
 import pandas as pd
 from skimage import io
@@ -13,6 +12,8 @@ import skimage.exposure as exposure
 from .exceptions import ImagesFolderNotFound
 from . import logger
 from gui import convert_to, meter, pix, um
+
+matplotlib.use("agg")
 
 
 def ensure_dir(file_path):
@@ -228,7 +229,7 @@ class Montage:
                     self._layout = df.apply(pd.to_numeric, errors='ignore')
                     break
 
-        logger.info("layout succesfully extracted from xml file.")
+        logger.info("layout successfully extracted from xml file.")
         return self._layout
 
     def _generate_sample_image(self):
@@ -282,7 +283,7 @@ class Montage:
 
                     for profile in self.flatfield_profiles:
                         for plane in ['Background', 'Foreground']:
-                            if not plane in profile: continue
+                            if plane not in profile: continue
                             if profile[plane]['Profile']['Type'] != 'Polynomial': continue
                             dims = profile[plane]['Profile']['Dims']
                             # ori = profile[plane]['Profile']['Origin']
@@ -295,8 +296,8 @@ class Montage:
                             xx, yy = np.meshgrid(x, y)
                             z = np.zeros(dims, dtype=np.float32)
 
-                            coeficients = profile[plane]['Profile']['Coefficients']
-                            for c in coeficients:
+                            coefficients = profile[plane]['Profile']['Coefficients']
+                            for c in coefficients:
                                 n = np.polyval(c, xx) + np.polyval(c, yy)
                                 z = n + z
                             profile[plane]['Profile']['Image'] = z

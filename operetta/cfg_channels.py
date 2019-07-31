@@ -19,9 +19,6 @@ from .exceptions import ImagesFolderNotFound, NoSamplesError
 from . import Montage, ensure_dir, logger
 from gui.utils import canvas_to_pil
 
-pd.set_option('display.width', 320)
-pd.set_option('display.max_columns', 20)
-
 
 class ConfiguredChannels(Montage):
 
@@ -73,7 +70,8 @@ class ConfiguredChannels(Montage):
             path = os.path.abspath(os.path.join(basepath, 'render', name))
         return name, path
 
-    def _load_cfg(self, path):
+    @staticmethod
+    def _load_cfg(path):
         with open(path, 'r') as configfile:
             logger.info('loading configuration from %s' % path)
             config = configparser.ConfigParser()
@@ -83,23 +81,23 @@ class ConfiguredChannels(Montage):
             if config.has_section(section):
                 channels = config.getint(section, 'channels')
 
-            ch = list()
-            for c in range(1, channels + 1):
-                section = 'Channel %d' % c
-                if config.has_section(section):
-                    ch.append({
-                        'number': config.getint(section, 'number'),
-                        'channel name': config.get(section, 'channel name'),
-                        'z_stack_aggregation': config.get(section, 'z_stack_aggregation',
-                                                          fallback='do a max projection'),
-                        'tag': config.get(section, 'tag'),
-                        'pipeline': ast.literal_eval(config.get(section, 'pipeline')),
-                        'rng_thickness': config.getfloat(section, 'rng_thickness', fallback=0),
-                        'render': config.getboolean(section, 'render'),
-                        'render intensity': config.getfloat(section, 'render intensity'),
-                        'flatfield': config.getboolean(section, 'flat field correction')
-                    })
-            return {'channels': ch}
+                ch = list()
+                for c in range(1, channels + 1):
+                    section = 'Channel %d' % c
+                    if config.has_section(section):
+                        ch.append({
+                            'number': config.getint(section, 'number'),
+                            'channel name': config.get(section, 'channel name'),
+                            'z_stack_aggregation': config.get(section, 'z_stack_aggregation',
+                                                              fallback='do a max projection'),
+                            'tag': config.get(section, 'tag'),
+                            'pipeline': ast.literal_eval(config.get(section, 'pipeline')),
+                            'rng_thickness': config.getfloat(section, 'rng_thickness', fallback=0),
+                            'render': config.getboolean(section, 'render'),
+                            'render intensity': config.getfloat(section, 'render intensity'),
+                            'flatfield': config.getboolean(section, 'flat field correction')
+                        })
+                return {'channels': ch}
 
     def _save_cfg(self, path):
         with open(path, 'w') as configfile:
@@ -501,10 +499,10 @@ class ConfiguredChannels(Montage):
             nuclei.append({"id": _id, "boundary": shapely.wkt.loads(nuc)})
 
         for ix, row in self._mdf[self._ix].iterrows():
-            id = row["id"]
+            _id = row["id"]
             nucl_bnd = shapely.wkt.loads(row["nuc_pix"])
 
-            logger.debug("intensity_in_nucleus for nucleus id %d" % id)
+            logger.debug("intensity_in_nucleus for nucleus id %d" % _id)
             signal_int = m.integral_over_surface(image, nucl_bnd)
             signal_density = signal_int / nucl_bnd.area
 
@@ -547,17 +545,17 @@ class ConfiguredChannels(Montage):
             nuclei.append({"id": _id, "boundary": shapely.wkt.loads(nuc)})
 
         for ix, row in self._mdf[self._ix].iterrows():
-            id = row["id"]
+            _id = row["id"]
             nucl_bnd = shapely.wkt.loads(row["nuc_pix"])
             cell_bnd = shapely.wkt.loads(row["cell_pix"])
             x0, y0, xf, yf = [int(u) for u in nucl_bnd.bounds]
 
             valid_sample, reason = m.is_valid_sample(frame, cell_bnd, nucl_bnd, nuclei)
             if not valid_sample: continue
-            logger.debug("particle_in_cytoplasm for cell id %d" % id)
+            logger.debug("particle_in_cytoplasm for cell id %d" % _id)
 
             centr_crop = image[y0:yf, x0:xf]
-            logger.info('applying centrosome algorithm for nuclei %d' % id)
+            logger.info('applying centrosome algorithm for nuclei %d' % _id)
 
             # load boundaries of um space for dataframe construction
             n_bum = shapely.wkt.loads(row["nucleus"])

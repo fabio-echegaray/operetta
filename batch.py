@@ -2,17 +2,17 @@ import configparser
 import json
 import logging
 import os
-import traceback
 import warnings
-import filters
 
 from pandas.errors import EmptyDataError
 
+import filters
 import operetta as o
-from exceptions import BadParameterError
 
 logger = logging.getLogger('batch')
 logger.setLevel(logging.DEBUG)
+
+# reduce console output while using batch tool
 logging.getLogger('matplotlib').setLevel(logging.ERROR)
 logging.getLogger('shapely').setLevel(logging.ERROR)
 warnings.simplefilter(action='ignore', category=FutureWarning)
