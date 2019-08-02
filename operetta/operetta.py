@@ -2,16 +2,18 @@ import os
 import xml.etree.ElementTree
 import json
 import re
-import matplotlib
 
-matplotlib.use("agg")
+import matplotlib
 import numpy as np
 import pandas as pd
 from skimage import io
+import skimage.exposure as exposure
 
 from .exceptions import ImagesFolderNotFound
 from . import logger
 from gui import convert_to, meter, pix, um
+
+matplotlib.use("agg")
 
 
 def ensure_dir(file_path):
@@ -35,11 +37,12 @@ class Montage:
         self.name = condition_name
 
         csv_path = os.path.join(folder, 'out', 'operetta.csv')
+        generate_structure = False
         if not os.path.exists(csv_path):
             logger.warning("File operetta.csv is missing in the folder structure, generating it now.\r\n"
-                           "\tA new folder wit the name 'out' will be created. You can safely delete this"
-                           "\tfolder if you don't want any of the analisys output from this tool.")
-
+                           "\tA new folder with the name 'out' will be created. You can safely delete this\r\n"
+                           "\tfolder if you don't want any of the analisys output from this tool.\r\n")
+            generate_structure = True
             self._generate_directory_structure()
         else:
             self.files = pd.read_csv(csv_path)
@@ -57,11 +60,13 @@ class Montage:
         self.files_gr = self.files.groupby(['row', 'col', 'fid']).size().reset_index()
         logger.info("%d image stacks available." % len(self.files_gr))
 
-        self.um_per_pix = None
-        self.pix_per_um = None
         self._layout = None
-
         self.flatfield_profiles = None
+
+        if generate_structure and os.path.exists(self.images_path):
+            self._generate_sample_image()
+        else:
+            raise ImagesFolderNotFound('Images folder is not in the structure.')
 
     @staticmethod
     def filename(row):
@@ -84,10 +89,22 @@ class Montage:
     def z_positions(self):
         return self.files['p'].unique()
 
+    @property
+    def um_per_pix(self):
+        um_per_pix = self.files['um_per_pix'].unique()
+        assert len(um_per_pix) == 1, 'different resolutions for dataset'
+        return float(um_per_pix[0])
+
+    @property
+    def pix_per_um(self):
+        pix_per_um = self.files['pix_per_um'].unique()
+        assert len(pix_per_um) == 1, 'different resolutions for dataset'
+        return float(pix_per_um[0])
+
     def stack_generator(self):
-        l = len(self.files_gr)
+        m = len(self.files_gr)
         for ig, g in self.files_gr.iterrows():
-            logger.info('stack generator:  %d of %d - row=%d col=%d fid=%d' % (ig + 1, l, g['row'], g['col'], g['fid']))
+            logger.info('stack generator:  %d of %d - row=%d col=%d fid=%d' % (ig + 1, m, g['row'], g['col'], g['fid']))
             yield g['row'], g['col'], g['fid']
 
     def add_mesurement(self, row, col, f, name, value):
@@ -95,10 +112,10 @@ class Montage:
 
     def max_projection(self, *args):
         if len(args) == 1 and isinstance(args[0], int):
-            id = args[0]
-            r = self.files_gr.ix[id - 1]
+            _id = args[0]
+            r = self.files_gr.ix[_id - 1]
             row, col, fid = r['row'], r['col'], r['fid']
-            logger.debug('retrieving image id=%d row=%d col=%d fid=%d' % (id, row, col, fid))
+            logger.debug('retrieving image id=%d row=%d col=%d fid=%d' % (_id, row, col, fid))
             return self._max_projection_row_col_fid(row, col, fid)
 
         elif len(args) == 3 and np.all([np.issubdtype(type(a), np.integer) for a in args]):
@@ -107,12 +124,6 @@ class Montage:
 
     def _max_projection_row_col_fid(self, row, col, f):
         group = self.files[(self.files['row'] == row) & (self.files['col'] == col) & (self.files['fid'] == f)]
-        um_per_pix = group['um_per_pix'].unique()
-        pix_per_um = group['pix_per_um'].unique()
-        assert len(um_per_pix) == 1 and len(pix_per_um) == 1, 'different resolutions for projection'
-        self.um_per_pix = um_per_pix[0]
-        self.pix_per_um = pix_per_um[0]
-
         channels = list()
         for ic, c in group.groupby('ch'):  # iterate over channels
             files = list()
@@ -121,17 +132,32 @@ class Montage:
                     files.append(self.filename(z))
             first_file = os.path.join(self.images_path, files.pop())
             try:
-                max = io.imread(first_file)
+                max_img = io.imread(first_file)
                 for f in files:
                     fname = os.path.join(self.images_path, f)
                     img = io.imread(fname)
-                    max = np.maximum(max, img)
+                    max_img = np.maximum(max_img, img)
 
-                channels.append(max)
+                channels.append(max_img)
             except Exception as e:
                 logger.error(e)
 
         assert len(channels) > 0, 'no images out of max projection'
+        return channels
+
+    def image(self, row=0, col=0, fid=0, zpos=0):
+        f = self.files[(self.files['row'] == row) & (self.files['col'] == col) &
+                       (self.files['fid'] == fid) & (self.files['p'] == zpos)]
+
+        channels = list()
+        for ic, c in f.groupby('ch'):  # iterate over channels
+            try:
+                img = io.imread(os.path.join(self.images_path, self.filename(c)))
+                channels.append(img)
+            except Exception as e:
+                logger.error(e)
+
+        assert len(channels) > 0, 'no images out extracted'
         return channels
 
     def measure(self, row, col, f):
@@ -148,16 +174,15 @@ class Montage:
         e = xml.etree.ElementTree.parse(os.path.join(images_path, 'Index.idx.xml')).getroot()
         ims = e.find('d:Images', ns).findall('d:Image', ns)
         list_of_dicts_of_img = [{x.tag.replace('{%s}' % ns['d'], ''): x.text for x in im} for im in ims]
-        f = (
-            pd.DataFrame(list_of_dicts_of_img)
-                .rename(index=str,
-                        columns={"Row": "row", "Col": "col", "FieldID": "fid", "PlaneID": "p", "TimepointID": "tid",
-                                 "ChannelID": "ch", "FlimID": "fl", "URL": "filename", })
-                .drop(['AbsPositionZ', 'AbsTime', 'AcquisitionType', 'BinningX', 'BinningY', 'CameraType',
-                       'ChannelType', 'ExposureTime', 'IlluminationType', 'ImageSizeX', 'ImageSizeY', 'ImageType',
-                       'MainEmissionWavelength', 'MainExcitationWavelength', 'MaxIntensity', 'MeasurementTimeOffset',
-                       'OrientationMatrix', 'PositionX', 'PositionY', 'PositionZ', 'State'], axis=1)
-        )
+        f = (pd.DataFrame(list_of_dicts_of_img)
+             .rename(index=str, columns={"Row": "row", "Col": "col", "FieldID": "fid",
+                                         "PlaneID": "p", "TimepointID": "tid",
+                                         "ChannelID": "ch", "FlimID": "fl", "URL": "filename", })
+             .drop(['AbsPositionZ', 'AbsTime', 'AcquisitionType', 'BinningX', 'BinningY', 'CameraType',
+                    'ChannelType', 'ExposureTime', 'IlluminationType', 'ImageSizeX', 'ImageSizeY', 'ImageType',
+                    'MainEmissionWavelength', 'MainExcitationWavelength', 'MaxIntensity', 'MeasurementTimeOffset',
+                    'OrientationMatrix', 'PositionX', 'PositionY', 'PositionZ', 'State'], axis=1)
+             )
 
         assert (f['ImageResolutionX'] == f['ImageResolutionY']).all(), 'some pixels are not square'
 
@@ -166,6 +191,8 @@ class Montage:
             lambda rx: convert_to(rx * meter / pix, um / pix).n().args[0])
         f.loc[:, 'pix_per_um'] = 1 / f['um_per_pix']
         f.drop(['ImageResolutionX', 'ImageResolutionY'], axis=1, inplace=True)
+        for key in ['row', 'col', 'fid', 'ch', 'tid']:
+            f.loc[:, key] = f[key].astype('int32')
         return f[['row', 'col', 'fid', 'p', 'ch', 'tid', 'fl', 'ChannelName', 'um_per_pix', 'pix_per_um',
                   'ObjectiveMagnification', 'ObjectiveNA', 'filename', 'id', ]]
 
@@ -202,7 +229,7 @@ class Montage:
                     self._layout = df.apply(pd.to_numeric, errors='ignore')
                     break
 
-        logger.info("layout succesfully extracted from xml file.")
+        logger.info("layout successfully extracted from xml file.")
         return self._layout
 
     def _generate_sample_image(self):
@@ -210,6 +237,7 @@ class Montage:
         from matplotlib.figure import Figure
         from gui.utils import canvas_to_pil
 
+        logger.debug("Generating sample image...")
         cfg_ch = self.files.groupby(['ch', 'ChannelName']).size().reset_index().drop(0, axis=1)
         max_ch = cfg_ch['ch'].max()
         images = self.max_projection(np.random.randint(len(self.files_gr)))
@@ -221,9 +249,11 @@ class Montage:
 
         for i in range(4):
             images = self.max_projection(np.random.randint(len(self.files_gr)))
+            images = [exposure.equalize_hist(im) for im in images]
+
             for im, ch, title in zip(images, cfg_ch['ch'], cfg_ch['ChannelName']):
-                sp = i * 4 + ch
-                ax = fig.add_subplot(max_ch, 4, sp)
+                sp = i * max_ch + ch
+                ax = fig.add_subplot(4, max_ch, sp)
                 ax.imshow(im, extent=[0, w_um, h_um, 0], cmap='gray')
                 ax.set_xlim([0, w_um])
                 ax.set_ylim([0, h_um])
@@ -240,11 +270,11 @@ class Montage:
                 ext = filename.split('.')[-1]
                 if ext == 'xml':
                     e = xml.etree.ElementTree.parse(os.path.join(root, filename)).getroot()
-                    map = [i for i in e if i.tag[-3:] == 'Map'][0]
+                    _map = [i for i in e if i.tag[-3:] == 'Map'][0]
 
                     self.flatfield_profiles = list()
                     regex = re.compile(r"([a-zA-Z]+[ ]?[0-9]*)")
-                    for p in map:
+                    for p in _map:
                         for ffp in p:
                             txt = ffp.text
                             txt = regex.sub(r'"\1"', txt)
@@ -253,7 +283,7 @@ class Montage:
 
                     for profile in self.flatfield_profiles:
                         for plane in ['Background', 'Foreground']:
-                            if not plane in profile: continue
+                            if plane not in profile: continue
                             if profile[plane]['Profile']['Type'] != 'Polynomial': continue
                             dims = profile[plane]['Profile']['Dims']
                             # ori = profile[plane]['Profile']['Origin']
@@ -266,8 +296,8 @@ class Montage:
                             xx, yy = np.meshgrid(x, y)
                             z = np.zeros(dims, dtype=np.float32)
 
-                            coeficients = profile[plane]['Profile']['Coefficients']
-                            for c in coeficients:
+                            coefficients = profile[plane]['Profile']['Coefficients']
+                            for c in coefficients:
                                 n = np.polyval(c, xx) + np.polyval(c, yy)
                                 z = n + z
                             profile[plane]['Profile']['Image'] = z
@@ -295,11 +325,3 @@ class Montage:
         self.files = self.generate_images_structure(self.base_path)
         op_csv = ensure_dir(os.path.join(self.base_path, 'out', 'operetta.csv'))
         self.files.to_csv(op_csv, index=False)
-
-        if os.path.exists(self.images_path):
-            try:
-                self._generate_sample_image()
-            except Exception as e:
-                logger.error(e)
-        else:
-            raise ImagesFolderNotFound('Images folder is not in the structure.')
