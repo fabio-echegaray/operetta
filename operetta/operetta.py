@@ -3,7 +3,6 @@ import xml.etree.ElementTree
 import json
 import re
 
-import matplotlib
 import numpy as np
 import pandas as pd
 from skimage import io
@@ -12,8 +11,6 @@ import skimage.exposure as exposure
 from .exceptions import ImagesFolderNotFound
 from . import logger
 from gui import convert_to, meter, pix, um
-
-matplotlib.use("agg")
 
 
 def ensure_dir(file_path):
