@@ -2,16 +2,17 @@ import configparser
 import json
 import logging
 import os
-import traceback
 import warnings
 
 from pandas.errors import EmptyDataError
 
+import filters
 import operetta as o
-from exceptions import BadParameterError
 
 logger = logging.getLogger('batch')
 logger.setLevel(logging.DEBUG)
+
+# reduce console output while using batch tool
 logging.getLogger('matplotlib').setLevel(logging.ERROR)
 logging.getLogger('shapely').setLevel(logging.ERROR)
 warnings.simplefilter(action='ignore', category=FutureWarning)
@@ -80,7 +81,7 @@ if __name__ == '__main__':
 
         operetta = o.ConfiguredChannels(args.folder)
 
-        if args.measure:
+        if args.measure or args.render:
             df = operetta.measure(args.id)
 
         if args.render:
@@ -115,5 +116,5 @@ if __name__ == '__main__':
                         cnd_path = o.ensure_dir(os.path.join(root, name, 'nuclei.pandas'))
                         pd.to_pickle(cnd, cnd_path)
                 else:
-                    df = df[~df['cell'].isna()]
+                    df = df.pipe(filters.cell)
                     pd.to_pickle(df, os.path.join(root, 'nuclei.pandas'))

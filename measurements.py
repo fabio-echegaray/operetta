@@ -65,16 +65,34 @@ def eng_string(x, format='%s', si=False):
     return ('%s' + format + '%s') % (sign, x3, exp3_text)
 
 
-def integral_over_surface(image, polygon):
-    c, r = polygon.boundary.xy
-    rr, cc = draw.polygon(r, c)
+def integral_over_surface(image, polygon: Polygon):
+    assert polygon.is_valid, "Polygon is invalid"
 
     try:
+        c, r = polygon.exterior.xy
+        rr, cc = draw.polygon(r, c)
         ss = np.sum(image[rr, cc])
+        for interior in polygon.interiors:
+            c, r = interior.xy
+            rr, cc = draw.polygon(r, c)
+            ss -= np.sum(image[rr, cc])
         return ss
     except Exception:
         logger.warning('integral_over_surface measured incorrectly')
         return np.nan
+
+
+def generate_mask_from(polygon: Polygon, shape=None):
+    if shape is None:
+        minx, miny, maxx, maxy = polygon.bounds
+        image = np.zeros((maxx - minx, maxy - miny), dtype=np.bool)
+    else:
+        image = np.zeros(shape, dtype=np.bool)
+
+    c, r = polygon.boundary.xy
+    rr, cc = draw.polygon(r, c)
+    image[rr, cc] = True
+    return image
 
 
 def nuclei_segmentation(image, compute_distance=False, radius=10):
