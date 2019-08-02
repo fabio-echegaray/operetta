@@ -7,7 +7,7 @@ logger.setLevel(logging.DEBUG)
 
 
 def cell(df):
-    if not "cell" in df:
+    if "cell" not in df:
         return df
     return df[~df["cell"].isna()]
 
@@ -26,4 +26,15 @@ def nucleus(df, radius_min=0, radius_max=np.inf):
     logger.info("filtering nuclei with area greater than %0.2f[um^2] and less than %0.2f[um^2]" % (
         area_min_thresh, area_max_thresh))
     n_idx = df.apply(lambda row: area_max_thresh > shapely.wkt.loads(row['nucleus']).area > area_min_thresh, axis=1)
+    return df[n_idx]
+
+
+def polsby_popper(df, column):
+    def _pp(_df):
+        pol = shapely.wkt.loads(_df[column])
+        pp = pol.area * np.pi * 4 / pol.length ** 2
+        return pp > 0.8
+
+    logger.info("filtering %s with a Polsby-Popper score greater than %0.2f" % (column, 0.8))
+    n_idx = df.apply(_pp, axis=1)
     return df[n_idx]
