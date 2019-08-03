@@ -13,7 +13,7 @@ from shapely.geometry.point import Point
 from shapely import affinity
 from shapely.geometry.polygon import Polygon
 
-import plots as p
+from plots import utils as p
 import measurements as m
 from .exceptions import ImagesFolderNotFound, NoSamplesError
 from . import Montage, ensure_dir, logger
