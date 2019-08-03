@@ -2,8 +2,8 @@ import matplotlib
 import matplotlib.pyplot as plt
 from matplotlib.path import Path
 from matplotlib.patches import PathPatch
-from shapely.geometry import Polygon
 from matplotlib.ticker import EngFormatter
+from shapely.geometry import Polygon
 import numpy as np
 import matplotlib.colors as mcolors
 from numpy import asarray, concatenate, ones
