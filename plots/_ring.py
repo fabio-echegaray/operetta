@@ -8,6 +8,7 @@ import pandas as pd
 import seaborn as sns
 import shapely.wkt
 
+from plots.utils import histogram_of_every_row
 import operetta as o
 
 
@@ -70,7 +71,7 @@ class Ring():
         labels = [logform(i) for i in ticks]
 
         g = sns.FacetGrid(self.dmax, hue="Compound", legend_out=True)
-        g = (g.map_dataframe(_histogram, "ring_dens_ratio", bins=bins)
+        g = (g.map_dataframe(_histogram_act_rng_ratio, "ring_dens_ratio", bins=bins)
              .set(xscale='log')
              .set(xticks=ticks, xticklabels=labels, xlim=(min(ticks), max(ticks)))
              .add_legend()
@@ -80,7 +81,7 @@ class Ring():
         plt.close()
 
         g = sns.FacetGrid(self.dmax, row="Compound", hue="Compound", legend_out=True)
-        g = (g.map_dataframe(_histogram, "ring_dens_ratio", bins=bins)
+        g = (g.map_dataframe(_histogram_act_rng_ratio, "ring_dens_ratio", bins=bins)
              .set(xscale='log')
              .set(xticks=ticks, xticklabels=labels, xlim=(min(ticks), max(ticks)))
              .add_legend()
@@ -145,9 +146,19 @@ class Ring():
         fig.savefig(path)
         plt.close()
 
+    def actin_ring_histograms(self):
+        g = sns.FacetGrid(self.dmax, row="Compound", height=2, aspect=2, legend_out=True)
+        g = (g.map_dataframe(histogram_of_every_row, "act_rng_hist")
+             .set(xscale='log')
+             .set(xlim=(100, 1e4))
+             )
+        path = o.ensure_dir(os.path.join(self.cc.base_path, 'out', 'graphs', 'actin_rng_hist.png'))
+        g.savefig(path, dpi=150)
+        plt.close()
+
 
 # Histogram of actin ring ratio
-def _histogram(col_lbl, **kwargs):
+def _histogram_act_rng_ratio(col_lbl, **kwargs):
     ax = plt.gca()
     data = kwargs.pop("data")
     color = kwargs.pop("color")

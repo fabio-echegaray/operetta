@@ -82,6 +82,25 @@ def integral_over_surface(image, polygon: Polygon):
         return np.nan
 
 
+def histogram_of_surface(image, polygon: Polygon, bins=None):
+    assert polygon.is_valid, "Polygon is invalid"
+
+    try:
+        hh = np.zeros(shape=image.shape, dtype=np.bool)
+        c, r = polygon.exterior.xy
+        rr, cc = draw.polygon(r, c)
+        hh[rr, cc] = True
+        for interior in polygon.interiors:
+            c, r = interior.xy
+            rr, cc = draw.polygon(r, c)
+            hh[rr, cc] = False
+        hist, edges = np.histogram(image[hh].ravel(), bins)
+        return hist, edges
+    except Exception:
+        logger.warning('histogram_of_surface measured incorrectly')
+        return np.nan, np.nan
+
+
 def generate_mask_from(polygon: Polygon, shape=None):
     if shape is None:
         minx, miny, maxx, maxy = polygon.bounds

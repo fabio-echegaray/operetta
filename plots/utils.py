@@ -2,6 +2,7 @@ import ast
 
 import matplotlib
 import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker
 from matplotlib.path import Path
 from matplotlib.patches import PathPatch
 from matplotlib.ticker import EngFormatter
@@ -131,11 +132,29 @@ def render_polygon(polygon: Polygon, zorder=0, ax=None):
     ax.set_aspect(1.0)
 
 
-def histogram_of_every_row(df, counts_col="_hist_counts", edges_col="_hist_edges", ax=None):
-    if ax is None:
-        ax = plt.gca()
+def histogram_of_every_row(counts_col, **kwargs):
+    """
+    Plots the histogram of every row in a dataframe, overlaying them.
+    Meant to be used within a map_dataframe call.
 
-    for _d in df.iterrows():
+    :param df: Dataframe
+    :param counts_col: Name of the counts column
+    :param edges_col: Name of the edges column
+    :param ax: Matplotlib axis object
+    :return:
+    """
+    ax = plt.gca()
+    edges_col = kwargs.pop("edges_col") if "edges_col" in kwargs else "hist_edges"
+    data = kwargs.pop("data")
+    color = kwargs.pop("color")
+    label = kwargs.pop("label") if "label" in kwargs else None
+
+    for _ix, _d in data.iterrows():
         counts = ast.literal_eval(_d[counts_col])
         edges = ast.literal_eval(_d[edges_col])
-        plt.hist(edges[:-1], edges, weights=counts, alpha=1. / len(df), ax=ax)
+        plt.hist(edges[:-1], edges, weights=counts, alpha=1. / len(data), color=color)
+
+    print(len(data))
+    ax.xaxis.set_major_locator(ticker.LogLocator(base=10))
+    ax.xaxis.set_major_formatter(ticker.LogFormatterMathtext(base=10))
+    ax.yaxis.set_major_formatter(EngFormatter(unit=''))

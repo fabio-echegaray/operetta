@@ -19,6 +19,9 @@ from .exceptions import ImagesFolderNotFound, NoSamplesError
 from . import Montage, ensure_dir, logger
 from gui.utils import canvas_to_pil
 
+_hist_edges_arr_ops = {"precision": 2, "separator": ",", "suppress_small": True,
+                       "formatter": {"float": lambda x: "%0.2f" % x}}
+
 
 class ConfiguredChannels(Montage):
 
@@ -109,7 +112,8 @@ class ConfiguredChannels(Montage):
             config.add_section('Information')
             config.set('Information', '#')
             config.set('Information', '# allowed functions for the pipeline are: nucleus, cell, histogram, ')
-            config.set('Information', '#        intensity_in_nucleus, ring_around_nucleus, particle_in_cytoplasm')
+            config.set('Information', '#        intensity_in_nucleus, ring_around_nucleus, particle_in_cytoplasm,')
+            config.set('Information', '#        histogram_of_nucleus, histogram_of_ring.')
             config.set('Information', '#')
             config.set('Information', '#')
             config.set('Information', '# Accepted parameters:')
@@ -139,13 +143,13 @@ class ConfiguredChannels(Montage):
                 config.set(section, 'number', c - 1)
                 config.set(section, 'channel name', self.files.loc[self.files['ch'] == c, 'ChannelName'].iloc[0])
                 config.set(section, 'z_stack_aggregation', 'do a max projection')
+                config.set(section, 'tag', 'default')
+                config.set(section, 'pipeline', [])
                 config.set(section, 'rng_thickness', 3)
                 config.set(section, 'hist_bins', 100)
                 config.set(section, 'hist_min', 0)
                 config.set(section, 'hist_max', np.iinfo(np.uint16).max)
                 config.set(section, 'hist_log', True)
-                config.set(section, 'tag', 'default')
-                config.set(section, 'pipeline', [])
                 config.set(section, 'render', False)
                 config.set(section, 'render intensity', 0.1)
                 config.set(section, 'flat field correction', True)
@@ -426,6 +430,14 @@ class ConfiguredChannels(Montage):
         for _, cf in c.iterrows():
             self._stack_operation(row, col, fid, c, self._measure_histogram)
 
+        c = cfg[cfg['pipeline'].apply(lambda l: 'histogram_of_nucleus' in l)]
+        for _, cf in c.iterrows():
+            self._stack_operation(row, col, fid, c, self._measure_histogram_on_nucleus)
+
+        c = cfg[cfg['pipeline'].apply(lambda l: 'histogram_of_ring' in l)]
+        for _, cf in c.iterrows():
+            self._stack_operation(row, col, fid, c, self._measure_histogram_on_ring)
+
         return self._mdf
 
     def _measure_nuclei(self, nuclei_img, cfg, r=10):
@@ -450,8 +462,8 @@ class ConfiguredChannels(Montage):
                 'col': [self._col],
                 'fid': [self._fid],
                 'p': [self._zp],
-                'dna_int': [dna_int],
-                'dna_dens': [dna_int / nucl_bnd.area],
+                '%s_int' % cfg['tag'].iloc[0]: [int(dna_int)],
+                '%s_dens' % cfg['tag'].iloc[0]: [int(dna_int / nucl_bnd.area)],
                 'nucleus': n_bum.wkt,
                 'nuc_pix': nucl_bnd.wkt,
             })
@@ -503,8 +515,8 @@ class ConfiguredChannels(Montage):
 
                     # TODO: Add units support
                     ix = self._ix & (self._mdf['id'] == nucleus['id'])
-                    self._mdf.loc[ix, 'tubulin_int'] = tubulin_int
-                    self._mdf.loc[ix, 'tubulin_dens'] = tubulin_int / cell_bnd.area
+                    self._mdf.loc[ix, 'tubulin_int'] = int(tubulin_int)
+                    self._mdf.loc[ix, 'tubulin_dens'] = int(tubulin_int / cell_bnd.area)
                     self._mdf.loc[ix, 'cell'] = c_bum.wkt
                     self._mdf.loc[ix, 'cell_pix'] = cell_bnd.wkt
 
@@ -531,8 +543,8 @@ class ConfiguredChannels(Montage):
             signal_density = signal_int / nucl_bnd.area
 
             # TODO: scale intensity from pixels^2 to um^2
-            self._mdf.loc[ix, '%s_int' % cfg['tag'].iloc[0]] = signal_int
-            self._mdf.loc[ix, '%s_dens' % cfg['tag'].iloc[0]] = signal_density
+            self._mdf.loc[ix, '%s_int' % cfg['tag'].iloc[0]] = int(signal_int)
+            self._mdf.loc[ix, '%s_dens' % cfg['tag'].iloc[0]] = int(signal_density)
 
     def _measure_ring_intensity_around_nucleus(self, image, cfg):
         assert self._ix.any(), "no rows in the filtered dataframe"
@@ -555,6 +567,7 @@ class ConfiguredChannels(Montage):
 
             # TODO: scale intensity from pixels^2 to um^2
             self._mdf.loc[ix, 'ring'] = rng_um.wkt
+            self._mdf.loc[ix, 'ring_pix'] = rng_bnd.wkt
             self._mdf.loc[ix, '%s_rng_int' % cfg['tag'].iloc[0]] = rng_int
             self._mdf.loc[ix, '%s_rng_dens' % cfg['tag'].iloc[0]] = rng_density
             # logger.debug("\r\n" + str(self._mdf[ix]))
@@ -647,9 +660,8 @@ class ConfiguredChannels(Montage):
         histogram, edges = np.histogram(image.ravel(), bins)
 
         if self._ix.any():
+            self._mdf.loc[self._ix, 'hist_edges'] = np.array2string(edges, **_hist_edges_arr_ops)
             self._mdf.loc[self._ix, '%s_hist' % tag] = np.array2string(histogram.astype(int), separator=',')
-            self._mdf.loc[self._ix, '%s_hist_edges' % tag] = np.array2string(edges, precision=2, separator=',',
-                                                                             suppress_small=True)
         else:
             d = pd.DataFrame(data={
                 'id': [None],
@@ -657,7 +669,55 @@ class ConfiguredChannels(Montage):
                 'col': [self._col],
                 'fid': [self._fid],
                 'p': [self._zp],
+                'hist_edges': [np.array2string(edges, **_hist_edges_arr_ops)],
                 '%s_hist_counts' % tag: [np.array2string(histogram.astype(int), separator=',')],
-                '%s_hist_edges' % tag: [np.array2string(edges, precision=2, separator=',', suppress_small=True)],
             })
             self._mdf = self._mdf.append(d, ignore_index=True, sort=False)
+
+    def _measure_histogram_on_nucleus(self, image, cfg):
+        assert self._ix.any(), "no rows in the filtered dataframe"
+        assert "nuc_pix" in self._mdf[self._ix], "nucleus detection step needed"
+
+        n_bins = cfg['hist_bins'].iloc[0]
+        min = cfg['hist_min'].iloc[0]
+        max = cfg['hist_max'].iloc[0]
+        tag = cfg['tag'].iloc[0]
+        log_bins = cfg['hist_log'].iloc[0]
+        if log_bins:
+            bins = np.logspace(np.log10(1 if min == 0 else min), np.log10(max), n_bins)
+        else:
+            bins = np.linspace(min, max, n_bins)
+
+        for ix, row in self._mdf[self._ix].iterrows():
+            _id = row["id"]
+            nucl_bnd = shapely.wkt.loads(row["nuc_pix"])
+            logger.debug("histogram_on_nucleus for nucleus id %d" % _id)
+
+            histogram, edges = m.histogram_of_surface(image, nucl_bnd, bins)
+
+            self._mdf.loc[self._ix, 'hist_edges'] = np.array2string(edges, **_hist_edges_arr_ops)
+            self._mdf.loc[self._ix, '%s_nuc_hist' % tag] = np.array2string(histogram.astype(int), separator=',')
+
+    def _measure_histogram_on_ring(self, image, cfg):
+        assert self._ix.any(), "no rows in the filtered dataframe"
+        assert "ring_pix" in self._mdf[self._ix], "ring detection step needed"
+
+        n_bins = cfg['hist_bins'].iloc[0]
+        min = cfg['hist_min'].iloc[0]
+        max = cfg['hist_max'].iloc[0]
+        tag = cfg['tag'].iloc[0]
+        log_bins = cfg['hist_log'].iloc[0]
+        if log_bins:
+            bins = np.logspace(np.log10(1 if min == 0 else min), np.log10(max), n_bins)
+        else:
+            bins = np.linspace(min, max, n_bins)
+
+        for ix, row in self._mdf[self._ix].iterrows():
+            _id = row["id"]
+            rng_bnd = shapely.wkt.loads(row["ring_pix"])
+            logger.debug("histogram_on_nucleus for nucleus id %d" % _id)
+
+            histogram, edges = m.histogram_of_surface(image, rng_bnd, bins)
+
+            self._mdf.loc[self._ix, 'hist_edges'] = np.array2string(edges, **_hist_edges_arr_ops)
+            self._mdf.loc[self._ix, '%s_rng_hist' % tag] = np.array2string(histogram.astype(int), separator=',')

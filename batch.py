@@ -18,7 +18,7 @@ warnings.simplefilter(action='ignore', category=FutureWarning)
 
 def collect(path, csv_fname="nuclei.pandas.csv"):
     df = pd.DataFrame()
-    cols = ['nucleus', 'nuc_pix', 'cell', 'cell_pix', 'ring']
+    cols = ['nucleus', 'nuc_pix', 'cell', 'cell_pix', 'ring', 'ring_pix']
     manager = enlighten.get_manager()
 
     csv_file = os.path.join(path, csv_fname)
