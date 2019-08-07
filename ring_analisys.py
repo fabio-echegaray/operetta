@@ -4,6 +4,7 @@ from shutil import copyfile
 import argparse
 
 import pandas as pd
+import numpy as np
 import enlighten
 
 import operetta as o
@@ -49,6 +50,11 @@ def select_images(df, operetta_folder, method="copy"):
     manager.stop()
 
 
+def hist_area(edges, counts):
+    bin_width = np.diff(edges)
+    return np.sum([bin_width[i] * counts[i] for i in range(len(counts))])
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Does a ring analysis based on previous measurements.')
     parser.add_argument('folder', metavar='FOLDER', type=str,
@@ -58,7 +64,7 @@ if __name__ == '__main__':
     operetta = o.ConfiguredChannels(args.folder)
     pl = Ring(operetta)
 
-    dmax = pl.dmax
+    d = pl.dmax
 
     select_images(dmax, operetta.base_path)
     # exit(0)
@@ -70,3 +76,4 @@ if __name__ == '__main__':
     pl.dna_vs_actin_intesity()
     pl.actin_ring()
     pl.actin_ring_histograms()
+    pl.histogram_areas()

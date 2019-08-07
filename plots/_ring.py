@@ -19,8 +19,13 @@ def eval_into_array(df, column_name):
     return df
 
 
+def hist_area(edges, counts):
+    bin_width = np.diff(edges)
+    return np.sum([bin_width[i] * counts[i] for i in range(len(counts))])
+
+
 class Ring():
-    _columns = ['row', 'col', 'fid', 'p',
+    _columns = ['id', 'row', 'col', 'fid', 'p',
                 'nuc_int', 'nuc_dens',
                 'act_int', 'act_dens',
                 'act_rng_int', 'act_rng_dens',
@@ -33,6 +38,15 @@ class Ring():
         self.all = (pd.read_csv(os.path.join(cc.base_path, "out", "nuclei.pandas.csv"), usecols=self._columns)
                     .merge(cc.layout, on=["row", "col"])
                     )
+
+        self._df = None
+        self._dmax = None
+        self.formatter = EngFormatter(unit='')
+
+    @property
+    def df(self):
+        if self._df is not None: return self._df
+
         df = (self.all
               .pipe(eval_into_array, column_name="hist_edges")
               .pipe(eval_into_array, column_name="act_nuc_hist")
@@ -44,10 +58,19 @@ class Ring():
               )
         df.loc[:, 'ring_int_ratio'] = df['act_rng_int'] / df['act_int']
         df.loc[:, 'ring_dens_ratio'] = df['act_rng_dens'] / df['act_dens']
-        idx_max = df.groupby(['row', 'col', 'fid'])['ring_dens_ratio'].transform(max) == df['ring_dens_ratio']
-        self.df = df
-        self.dmax = df[idx_max]
-        self.formatter = EngFormatter(unit='')
+
+        self._df = df
+
+        return self._df
+
+    @property
+    def dmax(self):
+        if self._dmax is not None: return self._dmax
+
+        idx_max = self.df.groupby(['row', 'col', 'fid'])['ring_dens_ratio'].transform(max) == self.df['ring_dens_ratio']
+        self._dmax = self.df[idx_max]
+
+        return self._dmax
 
     def nuclei_filtered(self):
         fig = plt.figure(figsize=(16, 4), dpi=150)
@@ -92,7 +115,7 @@ class Ring():
         labels = [logform(i) for i in ticks]
 
         g = sns.FacetGrid(self.dmax, hue="Compound", legend_out=True)
-        g = (g.map_dataframe(_histogram_act_rng_ratio, "ring_dens_ratio", bins=bins)
+        g = (g.map_dataframe(_distplot, "ring_dens_ratio", bins=bins)
              .set(xscale='log')
              .set(xticks=ticks, xticklabels=labels, xlim=(min(ticks), max(ticks)))
              .add_legend()
@@ -102,7 +125,7 @@ class Ring():
         plt.close()
 
         g = sns.FacetGrid(self.dmax, row="Compound", hue="Compound", legend_out=True)
-        g = (g.map_dataframe(_histogram_act_rng_ratio, "ring_dens_ratio", bins=bins)
+        g = (g.map_dataframe(_distplot, "ring_dens_ratio", bins=bins)
              .set(xscale='log')
              .set(xticks=ticks, xticklabels=labels, xlim=(min(ticks), max(ticks)))
              .add_legend()
@@ -115,6 +138,7 @@ class Ring():
     def dna_vs_actin_intesity(self):
         g = sns.FacetGrid(self.dmax, hue="Compound", legend_out=True)
         g = (g.map(sns.kdeplot, "nuc_dens", "act_rng_dens", shade=True, shade_lowest=False)
+             .add_legend()
              )
         for _ax in g.axes[0]:
             _ax.xaxis.set_major_formatter(self.formatter)
@@ -125,6 +149,7 @@ class Ring():
 
         g = sns.FacetGrid(self.dmax, hue="Compound", legend_out=True)
         g = (g.map(sns.kdeplot, "nuc_int", "act_rng_int", shade=True, shade_lowest=False)
+             .add_legend()
              )
         for _ax in g.axes[0]:
             _ax.xaxis.set_major_formatter(self.formatter)
@@ -186,17 +211,70 @@ class Ring():
                 g = (g.map_dataframe(histogram_of_every_row, "act_%s_hist" % place)
                      .set(xscale='log')
                      .set(xlim=(100, 1e4))
+                     .add_legend()
                      )
                 path = o.ensure_dir(
                     os.path.join(self.cc.base_path, 'out', 'graphs', 'histogram_actin_%s_%s.png' % (place, flt)))
                 g.savefig(path, dpi=150)
                 plt.close()
 
+    def histogram_areas(self):
+        a = self.all
+        a.loc[:, 'rng_hist_area'] = a.apply(lambda r: hist_area(r['hist_edges'], r['act_rng_hist']), axis=1)
+        a.loc[:, 'nuc_hist_area'] = a.apply(lambda r: hist_area(r['hist_edges'], r['act_nuc_hist']), axis=1)
+        a.loc[:, 'hist_area_ratio'] = a['rng_hist_area'] / a['nuc_hist_area']
+        self.all = a
+
+        fig = plt.figure(figsize=(8, 8), dpi=150)
+        ax = fig.gca()
+        sns.scatterplot(x="nuc_hist_area", y="rng_hist_area", data=a, hue="Compound", alpha=0.01, rasterized=True)
+        plt.xscale('log')
+        plt.yscale('log')
+        ax.xaxis.set_major_formatter(self.formatter)
+        ax.yaxis.set_major_formatter(self.formatter)
+        path = o.ensure_dir(os.path.join(self.cc.base_path, 'out', 'graphs', 'histareas_scatter.pdf'))
+        fig.savefig(path)
+        plt.close()
+
+        logbins = np.logspace(0, np.log10(1e6), 1000)
+        g = sns.FacetGrid(a, hue="Compound")
+        g = (g.map_dataframe(_distplot, "nuc_hist_area", bins=logbins)
+             .set(xscale='log')
+             # .set(xticks=ticks, xticklabels=labels, xlim=(min(ticks), max(ticks)))
+             .add_legend()
+             )
+        path = o.ensure_dir(os.path.join(self.cc.base_path, 'out', 'graphs', 'histareas_nuc_dist.pdf'))
+        g.savefig(path)
+        plt.close()
+
+        g = sns.FacetGrid(a, hue="Compound")
+        g = (g.map_dataframe(_distplot, "rng_hist_area", bins=logbins)
+             .set(xscale='log')
+             # .set(xticks=ticks, xticklabels=labels, xlim=(min(ticks), max(ticks)))
+             .add_legend()
+             )
+        path = o.ensure_dir(os.path.join(self.cc.base_path, 'out', 'graphs', 'histareas_rng_dist.pdf'))
+        g.savefig(path)
+        plt.close()
+
+        logbins = np.logspace(0, np.log10(a["hist_area_ratio"].max()), 1000)
+        g = sns.FacetGrid(a, hue="Compound")
+        g = (g.map_dataframe(_distplot, "hist_area_ratio", bins=logbins)
+             .set(xscale='log')
+             # .set(xticks=ticks, xticklabels=labels, xlim=(min(ticks), max(ticks)))
+             .add_legend()
+             )
+        path = o.ensure_dir(os.path.join(self.cc.base_path, 'out', 'graphs', 'histareas_ratio_dist.pdf'))
+        g.savefig(path)
+        plt.close()
+
 
 # Histogram of actin ring ratio
-def _histogram_act_rng_ratio(col_lbl, **kwargs):
+def _distplot(col_lbl, **kwargs):
     ax = plt.gca()
+    print(kwargs)
     data = kwargs.pop("data")
     color = kwargs.pop("color")
     _bins = kwargs.pop("bins")
-    sns.distplot(data[col_lbl], bins=_bins, hist=False, color=color, ax=ax)
+    _lbl = kwargs.pop("label")
+    sns.distplot(data[col_lbl], bins=_bins, hist=False, color=color, label=_lbl, axlabel=False, ax=ax)

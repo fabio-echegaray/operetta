@@ -60,9 +60,9 @@ def histogram(df, edges=None, values=None, agg_fn="sum", edge_min=0, edge_max=np
             aggout = 0
 
         accepted = value_min < aggout < value_max
-        logger.debug("%0.1f < %0.1f(%s) < %0.1f %s" % (value_min, aggout, agg_fn, value_max, accepted))
+        # logger.debug("%0.1f < %0.1f(%s) < %0.1f %s" % (value_min, aggout, agg_fn, value_max, accepted))
         return accepted
 
-    logger.info("filtering %s based on histogram")
+    logger.info("filtering based on histogram")
     n_idx = df.apply(_hh, axis=1)
     return df[n_idx]
