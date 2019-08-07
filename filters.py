@@ -1,6 +1,7 @@
+import logging
+
 import shapely.wkt
 import numpy as np
-import logging
 
 logger = logging.getLogger('filters')
 logger.setLevel(logging.DEBUG)
@@ -37,4 +38,31 @@ def polsby_popper(df, column):
 
     logger.info("filtering %s with a Polsby-Popper score greater than %0.2f" % (column, 0.8))
     n_idx = df.apply(_pp, axis=1)
+    return df[n_idx]
+
+
+def histogram(df, edges=None, values=None, agg_fn="sum", edge_min=0, edge_max=np.inf, value_min=0, value_max=np.inf):
+    def _hh(_df):
+        # hist = np.array(ast.literal_eval(_df[edges]))
+        # vals = np.array(ast.literal_eval(_df[values]))
+        hist = _df[edges][:-1]
+        vals = _df[values]
+        ix = np.where((edge_min <= hist) & (hist <= edge_max))
+        if agg_fn == "sum":
+            aggout = vals[ix].sum()
+        elif agg_fn == "max":
+            aggout = vals[ix].max()
+        elif agg_fn == "min":
+            aggout = vals[ix].min()
+        elif agg_fn == "avg" or agg_fn == "mean":
+            aggout = vals[ix].mean()
+        else:
+            aggout = 0
+
+        accepted = value_min < aggout < value_max
+        logger.debug("%0.1f < %0.1f(%s) < %0.1f %s" % (value_min, aggout, agg_fn, value_max, accepted))
+        return accepted
+
+    logger.info("filtering %s based on histogram")
+    n_idx = df.apply(_hh, axis=1)
     return df[n_idx]

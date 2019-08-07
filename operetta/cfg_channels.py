@@ -142,9 +142,9 @@ class ConfiguredChannels(Montage):
                 config.add_section(section)
                 config.set(section, 'number', c - 1)
                 config.set(section, 'channel name', self.files.loc[self.files['ch'] == c, 'ChannelName'].iloc[0])
-                config.set(section, 'z_stack_aggregation', 'do a max projection')
                 config.set(section, 'tag', 'default')
                 config.set(section, 'pipeline', [])
+                config.set(section, 'z_stack_aggregation', 'do a max projection')
                 config.set(section, 'rng_thickness', 3)
                 config.set(section, 'hist_bins', 100)
                 config.set(section, 'hist_min', 0)
@@ -450,6 +450,7 @@ class ConfiguredChannels(Montage):
 
         for nucleus in nuclei:
             nucl_bnd = nucleus['boundary']
+            if nucl_bnd.area < np.pi * (3 * self.pix_per_um) ** 2: continue
             dna_int = m.integral_over_surface(nuclei_img, nucl_bnd)
 
             # convert everything to um space for dataframe construction

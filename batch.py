@@ -4,7 +4,6 @@ import warnings
 import enlighten
 
 from pandas.errors import EmptyDataError
-
 import filters
 
 logger = logging.getLogger('batch')
@@ -18,7 +17,16 @@ warnings.simplefilter(action='ignore', category=FutureWarning)
 
 def collect(path, csv_fname="nuclei.pandas.csv"):
     df = pd.DataFrame()
-    cols = ['nucleus', 'nuc_pix', 'cell', 'cell_pix', 'ring', 'ring_pix']
+    cols_to_delete = ['nucleus', 'nuc_pix', 'cell', 'cell_pix', 'ring', 'ring_pix']
+    cols_to_check = ['hist_edges', 'act_nuc_hist', 'act_rng_hist']
+    col_order = [
+        'id', 'row', 'col', 'fid', 'p',
+        'nuc_int', 'nuc_dens',
+        'act_int', 'act_dens',
+        'act_rng_int', 'act_rng_dens',
+        # 'nucleus', 'nuc_pix'
+        # 'ring', 'ring_pix',
+        'hist_edges', 'act_nuc_hist', 'act_rng_hist']
     manager = enlighten.get_manager()
 
     csv_file = os.path.join(path, csv_fname)
@@ -28,7 +36,6 @@ def collect(path, csv_fname="nuclei.pandas.csv"):
     for root, directories, filenames in os.walk(os.path.join(path, "pandas")):
         bar = manager.counter(total=len(filenames), desc='Progress', unit='files')
         for k, filename in enumerate(filenames):
-            # if k > 10: continue
             ext = filename.split('.')[-1]
             if ext == 'csv':
                 logger.info("adding %s" % filename)
@@ -38,9 +45,13 @@ def collect(path, csv_fname="nuclei.pandas.csv"):
                            .pipe(filters.nucleus, radius_min=4, radius_max=10)
                            .pipe(filters.polsby_popper, column="nucleus")
                            )
-                    csv = csv.drop(columns=[c for c in cols if c in csv])
-                    with open(csv_file, 'a') as f:
-                        csv.to_csv(f, mode='a', header=not f.tell())
+                    csv = csv.drop(columns=[c for c in cols_to_delete if c in csv])
+                    if pd.Series(cols_to_check).isin(csv.columns).all():
+                        with open(csv_file, 'a') as f:
+                            csv[col_order].to_csv(f, mode='a', header=not f.tell())
+                    else:
+                        logger.warning("skipped csv file %s because it didn't have all the columns we need" % filename)
+
                 except EmptyDataError:
                     logger.warning('found empty csv file: %s' % filename)
                 except ValueError:

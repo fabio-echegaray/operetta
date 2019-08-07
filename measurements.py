@@ -14,7 +14,7 @@ import skimage.measure as measure
 import skimage.morphology as morphology
 import skimage.segmentation as segmentation
 import skimage.transform as tf
-from shapely.geometry.polygon import Polygon
+from shapely.geometry import Polygon, LineString
 from scipy.ndimage.morphology import distance_transform_edt
 
 logging.basicConfig(level=logging.DEBUG)
