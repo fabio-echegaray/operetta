@@ -11,6 +11,7 @@ from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from matplotlib.figure import Figure
 from shapely.geometry.point import Point
 from shapely import affinity
+from shapely.wkt import dumps
 from shapely.geometry.polygon import Polygon
 
 from plots import utils as p
@@ -422,6 +423,7 @@ class ConfiguredChannels(Montage):
         assert len(c) < 2, 'only one particle_in_cytoplasm step per batch allowed'
         if len(c) == 1:
             assert self.cells_measured, 'particle_in_cytoplasm needs cell data'
+            self._stack_operation(row, col, fid, c, self._measure_particle_in_cytoplasm)
 
         # --------------------
         #     Histogram
@@ -449,7 +451,14 @@ class ConfiguredChannels(Montage):
             return
 
         for nucleus in nuclei:
-            nucl_bnd = nucleus['boundary']
+            nucl_bnd = (nucleus['boundary']
+                        .buffer(self.pix_per_um, join_style=1)
+                        .buffer(-self.pix_per_um, join_style=1)
+                        .simplify(self.pix_per_um / 2, preserve_topology=True)
+                        )
+            if nucl_bnd.is_empty: continue
+            logger.debug("previous simplify %d, after %d" %
+                         (len(nucleus['boundary'].exterior.coords), len(nucl_bnd.exterior.coords)))
             if nucl_bnd.area < np.pi * (3 * self.pix_per_um) ** 2: continue
             dna_int = m.integral_over_surface(nuclei_img, nucl_bnd)
 
@@ -465,8 +474,8 @@ class ConfiguredChannels(Montage):
                 'p': [self._zp],
                 '%s_int' % cfg['tag'].iloc[0]: [int(dna_int)],
                 '%s_dens' % cfg['tag'].iloc[0]: [int(dna_int / nucl_bnd.area)],
-                'nucleus': n_bum.wkt,
-                'nuc_pix': nucl_bnd.wkt,
+                'nucleus': dumps(n_bum, rounding_precision=4),
+                'nuc_pix': dumps(nucl_bnd, rounding_precision=1),
             })
             self._mdf = self._mdf.append(d, ignore_index=True, sort=False)
         logger.debug("%d nuclei found in image" % len(nuclei))
@@ -494,7 +503,14 @@ class ConfiguredChannels(Montage):
         # iterate through all cells
         for cl in cells:
             logger.debug("processing cell id %d" % cl['id'])
-            cell_bnd = cl['boundary']
+            cell_bnd = (cl['boundary']
+                        .buffer(self.pix_per_um, join_style=1)
+                        .buffer(-self.pix_per_um, join_style=1)
+                        .simplify(self.pix_per_um / 2, preserve_topology=True)
+                        )
+            logger.debug("previous simplify %d, after %d" %
+                         (len(cl['boundary'].exterior.coords), len(cell_bnd.exterior.coords)))
+
             for _id, nucleus in self._mdf.loc[self._ix, "nuc_pix"]:
                 valid_sample, reason = m.is_valid_sample(frame, cell_bnd, nucleus, nuclei)
                 if reason == m.REJECTION_TOUCHING_FRAME: touching_fr += 1
@@ -518,8 +534,8 @@ class ConfiguredChannels(Montage):
                     ix = self._ix & (self._mdf['id'] == nucleus['id'])
                     self._mdf.loc[ix, 'tubulin_int'] = int(tubulin_int)
                     self._mdf.loc[ix, 'tubulin_dens'] = int(tubulin_int / cell_bnd.area)
-                    self._mdf.loc[ix, 'cell'] = c_bum.wkt
-                    self._mdf.loc[ix, 'cell_pix'] = cell_bnd.wkt
+                    self._mdf.loc[ix, 'cell'] = dumps(c_bum, rounding_precision=4)
+                    self._mdf.loc[ix, 'cell_pix'] = dumps(cell_bnd, rounding_precision=1)
 
         logger.info("%d samples rejected because they were touching the frame" % touching_fr)
         logger.info("%d samples rejected because cell didn't have a nucleus" % no_nuclei)
@@ -553,7 +569,11 @@ class ConfiguredChannels(Montage):
             nucl_bnd = shapely.wkt.loads(row["nuc_pix"])
             thickness = float(cfg['rng_thickness'])
             thickness *= self.pix_per_um
-            rng_bnd = nucl_bnd.buffer(thickness).difference(nucl_bnd)
+            rng_bnd = (nucl_bnd
+                       .buffer(thickness)
+                       .difference(nucl_bnd)
+                       .simplify(self.pix_per_um / 2, preserve_topology=True)
+                       )
             if rng_bnd.area > 0:
                 rng_int = m.integral_over_surface(image, rng_bnd)
                 if np.isnan(rng_int): continue
@@ -567,10 +587,10 @@ class ConfiguredChannels(Montage):
             rng_um = affinity.scale(rng_bnd, xfact=self.um_per_pix, yfact=self.um_per_pix, origin=(0, 0, 0))
 
             # TODO: scale intensity from pixels^2 to um^2
-            self._mdf.loc[ix, 'ring'] = rng_um.wkt
-            self._mdf.loc[ix, 'ring_pix'] = rng_bnd.wkt
-            self._mdf.loc[ix, '%s_rng_int' % cfg['tag'].iloc[0]] = rng_int
-            self._mdf.loc[ix, '%s_rng_dens' % cfg['tag'].iloc[0]] = rng_density
+            self._mdf.loc[ix, 'ring'] = dumps(rng_um, rounding_precision=4)
+            self._mdf.loc[ix, 'ring_pix'] = dumps(rng_bnd, rounding_precision=1)
+            self._mdf.loc[ix, '%s_rng_int' % cfg['tag'].iloc[0]] = int(rng_int)
+            self._mdf.loc[ix, '%s_rng_dens' % cfg['tag'].iloc[0]] = int(rng_density)
             # logger.debug("\r\n" + str(self._mdf[ix]))
 
     def _measure_particle_in_cytoplasm(self, image, cfg):
@@ -671,7 +691,7 @@ class ConfiguredChannels(Montage):
                 'fid': [self._fid],
                 'p': [self._zp],
                 'hist_edges': [np.array2string(edges, **_hist_edges_arr_ops)],
-                '%s_hist_counts' % tag: [np.array2string(histogram.astype(int), separator=',')],
+                '%s_hist' % tag: [np.array2string(histogram.astype(int), separator=',')],
             })
             self._mdf = self._mdf.append(d, ignore_index=True, sort=False)
 
