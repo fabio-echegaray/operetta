@@ -13,7 +13,7 @@ from matplotlib.figure import Figure
 from shapely.geometry.point import Point
 from shapely import affinity
 from shapely.wkt import dumps
-from shapely.geometry import LineString, Polygon
+from shapely.geometry import LineString, MultiLineString, Polygon
 
 from plots import utils as p
 import measurements as m
@@ -314,7 +314,7 @@ class ConfiguredChannels(Montage):
                 p.render_polygon(ring, zorder=10, ax=axc)
 
             #  draw measured lines
-            if "act_int_lines" in smp:
+            if "act_int_lines" in smp and not np.isnan(smp['act_int_lines'].iloc[0]):
                 n_lines = int(smp['act_int_lines'].iloc[0])
                 angle_delta = 2 * np.pi / n_lines
                 minx, miny, maxx, maxy = nucleus.bounds
@@ -324,7 +324,11 @@ class ConfiguredChannels(Montage):
                                       (nucleus.centroid.x + radius * np.cos(angle),
                                        nucleus.centroid.y + radius * np.sin(angle))])
                     r_seg = ray.intersection(nucleus)
-                    pt = r_seg.coords[-1]
+                    if r_seg.is_empty:
+                        continue
+                    if type(r_seg) == MultiLineString:
+                        r_seg = r_seg[0]
+                    pt = Point(r_seg.coords[-1])
 
                     for pt0, pt1 in m.pairwise(nucleus.exterior.coords):
                         # if pt.touches(LineString([pt0, pt1])):
@@ -333,7 +337,7 @@ class ConfiguredChannels(Montage):
                             dx = pt1[0] - pt0[0]
                             dy = pt1[1] - pt0[1]
                             # touching point of the polygon line segment
-                            px, py = pt
+                            px, py = pt.x, pt.y
                             # normalize normal vector
                             mag = np.sqrt(dx ** 2 + dy ** 2)
                             dx, dy = dx / mag, dy / mag
@@ -808,11 +812,13 @@ class ConfiguredChannels(Montage):
         assert self._ix.any(), "no rows in the filtered dataframe"
         assert "ring_pix" in self._mdf[self._ix], "ring detection step needed"
 
+        width, height = [s for s in image.shape]
         tag = cfg['tag'].iloc[0]
         n_lines = cfg['n_lines'].iloc[0]
         rng_thick = cfg['rng_thickness'].iloc[0]
         rng_thick *= self.pix_per_um
         angle_delta = 2 * np.pi / n_lines
+        frame = Polygon([(0, 0), (0, width), (height, width), (height, 0)]).buffer(-rng_thick * self.pix_per_um)
 
         for ix, row in self._mdf[self._ix].iterrows():
             _id = row["id"]
@@ -826,7 +832,15 @@ class ConfiguredChannels(Montage):
                                   (nucleus.centroid.x + radius * np.cos(angle),
                                    nucleus.centroid.y + radius * np.sin(angle))])
                 r_seg = ray.intersection(nucleus)
-                pt = r_seg.coords[-1]
+                # print(r_seg, ray)
+                if r_seg.is_empty:
+                    continue
+                if type(r_seg) == MultiLineString:
+                    r_seg = r_seg[0]
+                    # print(r_seg)
+                pt = Point(r_seg.coords[-1])
+                if not frame.contains(pt):
+                    continue
 
                 for pt0, pt1 in m.pairwise(nucleus.exterior.coords):
                     # if pt.touches(LineString([pt0, pt1])):
@@ -835,7 +849,7 @@ class ConfiguredChannels(Montage):
                         dx = pt1[0] - pt0[0]
                         dy = pt1[1] - pt0[1]
                         # touching point of the polygon line segment
-                        px, py = pt
+                        px, py = pt.x, pt.y
                         # normalize normal vector
                         mag = np.sqrt(dx ** 2 + dy ** 2)
                         dx, dy = dx / mag, dy / mag
