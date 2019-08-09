@@ -15,7 +15,8 @@ import filters
 
 
 def eval_into_array(df, column_name):
-    df.loc[:, column_name] = df[column_name].apply(lambda r: np.array(ast.literal_eval(r)))
+    if column_name in df:
+        df.loc[:, column_name] = df[column_name].apply(lambda r: np.array(ast.literal_eval(r)))
     return df
 
 
@@ -30,16 +31,19 @@ class Ring():
                 'act_int', 'act_dens',
                 'act_rng_int', 'act_rng_dens',
                 'hist_edges', 'act_nuc_hist', 'act_rng_hist']
+    _cat = ['id', 'row', 'col', 'fid', 'p', 'Cell Type', 'Cell Count', 'Compound', 'Concentration']
 
     # def __init__(self, cc: o.ConfiguredChannels):
     def __init__(self, cc):
         self.cc = cc
 
-        self.all = (pd.read_csv(os.path.join(cc.base_path, "out", "nuclei.pandas.csv"), usecols=self._columns)
+        self.all = (pd.read_csv(os.path.join(cc.base_path, "out", "nuclei.pandas.csv"))
                     .merge(cc.layout, on=["row", "col"])
+                    .drop(columns=["Unnamed: 0"])
                     )
 
         self._df = None
+        self._lines = None
         self._dmax = None
         self.formatter = EngFormatter(unit='')
 
@@ -56,12 +60,29 @@ class Ring():
               .pipe(filters.histogram, edges="hist_edges", values="act_nuc_hist", agg_fn="max",
                     edge_min=500, edge_max=np.inf, value_min=0, value_max=150)
               )
-        df.loc[:, 'ring_int_ratio'] = df['act_rng_int'] / df['act_int']
-        df.loc[:, 'ring_dens_ratio'] = df['act_rng_dens'] / df['act_dens']
+        if np.all([c in df.columns for c in ['act_rng_int', 'act_int', 'act_rng_dens', 'act_dens']]):
+            df.loc[:, 'ring_int_ratio'] = df['act_rng_int'] / df['act_int']
+            df.loc[:, 'ring_dens_ratio'] = df['act_rng_dens'] / df['act_dens']
 
         self._df = df
 
-        return self._df
+        return self._df  # .drop(columns=[''])
+
+    @property
+    def lines(self):
+        if self._lines is not None: return self._lines
+
+        df = self.df
+        columns = [c for c in df.columns if c[:-2] == "act_line_"]
+        for c in columns:
+            df = df.pipe(eval_into_array, column_name=c)
+        a = pd.melt(self.df, id_vars=self._cat, value_vars=columns)
+        a.loc[:, "unit"] = a.apply(lambda r: "%s|%s|%s|%s|%s" % (r['id'], r['row'], r['col'], r['fid'], r['p']), axis=1)
+        a = a.pipe(filters.lines)
+
+        self._lines = a
+
+        return self._lines
 
     @property
     def dmax(self):
@@ -266,6 +287,76 @@ class Ring():
              )
         path = o.ensure_dir(os.path.join(self.cc.base_path, 'out', 'graphs', 'histareas_ratio_dist.pdf'))
         g.savefig(path)
+        plt.close()
+
+    def line_integrals(self):
+        a = self.all
+
+        a.loc[:, "unit"] = a.apply(lambda r: "%s|%s|%s|%s|%s" % (r['id'], r['row'], r['col'], r['fid'], r['p']), axis=1)
+        a = a[a["unit"].isin(self.lines["unit"])]
+        columns = [c for c in a.columns if c[:-6] == "act_line_"]
+        dd = pd.melt(self.df, id_vars=self._cat, value_vars=columns)
+
+        fig = plt.figure(figsize=(8, 8), dpi=150)
+        ax = fig.gca()
+        # sns.stripplot(x="Compound", y="value", data=dd)
+        sns.boxenplot(x="Compound", y="value", data=dd)
+        ax.yaxis.set_major_formatter(self.formatter)
+        ax.set_yscale('log')
+        path = o.ensure_dir(os.path.join(self.cc.base_path, 'out', 'graphs', 'line_boxplot.pdf'))
+        fig.savefig(path)
+        plt.close()
+
+    def line_measurements(self):
+        a = self.lines
+
+        # remove constant component of signal vector
+        # a.loc[:, "value"] = a.apply(lambda r: r['value'] - r['value'].mean(), axis=1)
+        a.loc[:, "crit"] = a['value'].apply(lambda v: v.max() - v.min())
+        a.loc[:, "v_mean"] = a['value'].apply(lambda v: v.min())
+        a.loc[:, "value_n"] = a["value"] - a["v_mean"]
+        a.drop(columns=["v_mean", "value"], inplace=True)
+        print(a)
+
+        # transform again into long format (see https://stackoverflow.com/questions/27263805
+        val_col = 'value_n'
+        ix_col = 'x_center'
+        b = pd.DataFrame({
+            col: pd.Series(data=np.repeat(a[col].values, a[val_col].str.len()))
+            for col in a.columns.drop([val_col, ix_col])}
+        ).assign(**{ix_col: np.concatenate(a[ix_col].values), val_col: np.concatenate(a[val_col].values)})[a.columns]
+
+        # build a new index
+        b = b.set_index(['unit', 'variable'])
+        b.index = [b.index.map('{0[0]}|{0[1]}'.format)]
+        b = b.reset_index().rename(columns={"level_0": "unit"})
+        print(b)
+
+        # plots
+        x_var = 'x_center'
+        y_var = 'value_n'
+
+        g = sns.FacetGrid(b, hue="Compound", row='Compound', height=2, aspect=2)
+        g = (g.map_dataframe(sns.lineplot, x=x_var, y=y_var, units='unit', estimator=None, alpha=1, lw=0.1)
+             # .set(yscale='log')
+             .set(xlim=(-20, 20))
+             # .add_legend()
+             )
+        path = o.ensure_dir(os.path.join(self.cc.base_path, 'out', 'graphs', 'lines_all.pdf'))
+        g.savefig(path)
+        plt.close()
+
+        fig = plt.figure(figsize=(6, 4), dpi=150)
+        ax = fig.gca()
+        sns.lineplot(x=x_var, y=y_var, data=b, hue='Compound', ax=ax)
+        ax.xaxis.set_major_formatter(self.formatter)
+        ax.yaxis.set_major_formatter(self.formatter)
+        ax.xaxis.set_major_locator(ticker.MultipleLocator(10))
+        ax.xaxis.set_minor_locator(ticker.MultipleLocator(5))
+        ax.set_xlim([-20, 20])
+        # plt.yscale('log')
+        path = o.ensure_dir(os.path.join(self.cc.base_path, 'out', 'graphs', 'lines_trend.pdf'))
+        fig.savefig(path)
         plt.close()
 
 

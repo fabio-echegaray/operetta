@@ -65,6 +65,13 @@ def eng_string(x, format='%s', si=False):
     return ('%s' + format + '%s') % (sign, x3, exp3_text)
 
 
+def pairwise(iterable):
+    "s -> (s0,s1), (s1,s2), (s2, s3), ..."
+    a, b = itertools.tee(iterable)
+    next(b, None)
+    return zip(a, b)
+
+
 def integral_over_surface(image, polygon: Polygon):
     assert polygon.is_valid, "Polygon is invalid"
 
@@ -99,6 +106,19 @@ def histogram_of_surface(image, polygon: Polygon, bins=None):
     except Exception:
         logger.warning('histogram_of_surface measured incorrectly')
         return np.nan, np.nan
+
+
+def integral_over_line(image, line: LineString):
+    assert line.is_valid, "LineString is invalid"
+    try:
+        for pt0, pt1 in pairwise(line.coords):
+            r0, c0, r1, c1 = np.array(list(pt0) + list(pt1)).astype(int)
+            rr, cc = draw.line(r0, c0, r1, c1)
+            ss = np.sum(image[rr, cc])
+            return ss
+    except Exception:
+        logger.warning('integral_over_line measured incorrectly')
+        return np.nan
 
 
 def generate_mask_from(polygon: Polygon, shape=None):

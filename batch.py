@@ -18,15 +18,6 @@ warnings.simplefilter(action='ignore', category=FutureWarning)
 def collect(path, csv_fname="nuclei.pandas.csv"):
     df = pd.DataFrame()
     cols_to_delete = ['nucleus', 'nuc_pix', 'cell', 'cell_pix', 'ring', 'ring_pix']
-    cols_to_check = ['hist_edges', 'act_nuc_hist', 'act_rng_hist']
-    col_order = [
-        'id', 'row', 'col', 'fid', 'p',
-        'nuc_int', 'nuc_dens',
-        'act_int', 'act_dens',
-        'act_rng_int', 'act_rng_dens',
-        # 'nucleus', 'nuc_pix'
-        # 'ring', 'ring_pix',
-        'hist_edges', 'act_nuc_hist', 'act_rng_hist']
     manager = enlighten.get_manager()
 
     csv_file = os.path.join(path, csv_fname)
@@ -46,11 +37,8 @@ def collect(path, csv_fname="nuclei.pandas.csv"):
                            .pipe(filters.polsby_popper, column="nucleus")
                            )
                     csv = csv.drop(columns=[c for c in cols_to_delete if c in csv])
-                    if pd.Series(cols_to_check).isin(csv.columns).all():
-                        with open(csv_file, 'a') as f:
-                            csv[col_order].to_csv(f, mode='a', header=not f.tell())
-                    else:
-                        logger.warning("skipped csv file %s because it didn't have all the columns we need" % filename)
+                    with open(csv_file, 'a') as f:
+                        csv.to_csv(f, mode='a', header=not f.tell())
 
                 except EmptyDataError:
                     logger.warning('found empty csv file: %s' % filename)

@@ -4,6 +4,7 @@ import configparser
 
 from skimage import color
 from skimage import exposure
+from skimage import draw
 import shapely.wkt
 import numpy as np
 import pandas as pd
@@ -12,7 +13,7 @@ from matplotlib.figure import Figure
 from shapely.geometry.point import Point
 from shapely import affinity
 from shapely.wkt import dumps
-from shapely.geometry.polygon import Polygon
+from shapely.geometry import LineString, Polygon
 
 from plots import utils as p
 import measurements as m
@@ -97,6 +98,7 @@ class ConfiguredChannels(Montage):
                             'tag': config.get(section, 'tag'),
                             'pipeline': ast.literal_eval(config.get(section, 'pipeline')),
                             'rng_thickness': config.getfloat(section, 'rng_thickness', fallback=0),
+                            'n_lines': config.getint(section, 'n_lines', fallback=3),
                             'hist_bins': config.getint(section, 'hist_bins', fallback=10),
                             'hist_min': config.getint(section, 'hist_min', fallback=0),
                             'hist_max': config.getint(section, 'hist_max', fallback=np.iinfo(np.uint16).max),
@@ -114,7 +116,7 @@ class ConfiguredChannels(Montage):
             config.set('Information', '#')
             config.set('Information', '# allowed functions for the pipeline are: nucleus, cell, histogram, ')
             config.set('Information', '#        intensity_in_nucleus, ring_around_nucleus, particle_in_cytoplasm,')
-            config.set('Information', '#        histogram_of_nucleus, histogram_of_ring.')
+            config.set('Information', '#        line_intensity_ring, histogram_of_nucleus, histogram_of_ring.')
             config.set('Information', '#')
             config.set('Information', '#')
             config.set('Information', '# Accepted parameters:')
@@ -132,6 +134,9 @@ class ConfiguredChannels(Montage):
             config.set('Information', '#         hist_max: Upper boundary for bins.')
             config.set('Information', '#         hist_log: Makes bin to look equally sized on a log scale.')
             config.set('Information', '#')
+            config.set('Information', '#     for line_intensity_ring:')
+            config.set('Information', '#         n_lines: Number of lines to measure.')
+            config.set('Information', '#')
             config.set('Information', '#')
 
             config.add_section('General')
@@ -147,6 +152,7 @@ class ConfiguredChannels(Montage):
                 config.set(section, 'pipeline', [])
                 config.set(section, 'z_stack_aggregation', 'do a max projection')
                 config.set(section, 'rng_thickness', 3)
+                config.set(section, 'n_lines', 3)
                 config.set(section, 'hist_bins', 100)
                 config.set(section, 'hist_min', 0)
                 config.set(section, 'hist_max', np.iinfo(np.uint16).max)
@@ -201,7 +207,7 @@ class ConfiguredChannels(Montage):
         fig_general = Figure((max_width * 4 / 150, max_width * 4 / 150), dpi=150)
         canvas_g = FigureCanvas(fig_general)
         # canvas for closeup image
-        fig_closeup = Figure((max_width / 150, max_width / 150), dpi=150)
+        fig_closeup = Figure((max_width / 150, max_width / 150), dpi=400)
         canvas_c = FigureCanvas(fig_closeup)
 
         for _ip, dpos in dfi.groupby('p'):
@@ -306,6 +312,54 @@ class ConfiguredChannels(Montage):
             ring = shapely.wkt.loads(smp['ring'].iloc[0])
             if ring.area > 0:
                 p.render_polygon(ring, zorder=10, ax=axc)
+
+            #  draw measured lines
+            if "act_int_lines" in smp:
+                n_lines = int(smp['act_int_lines'].iloc[0])
+                angle_delta = 2 * np.pi / n_lines
+                minx, miny, maxx, maxy = nucleus.bounds
+                radius = max(maxx - minx, maxy - miny)
+                for angle in [angle_delta * i for i in range(n_lines)]:
+                    ray = LineString([nucleus.centroid,
+                                      (nucleus.centroid.x + radius * np.cos(angle),
+                                       nucleus.centroid.y + radius * np.sin(angle))])
+                    r_seg = ray.intersection(nucleus)
+                    pt = r_seg.coords[-1]
+
+                    for pt0, pt1 in m.pairwise(nucleus.exterior.coords):
+                        # if pt.touches(LineString([pt0, pt1])):
+                        if Point(pt).distance(LineString([pt0, pt1])) < 1e-6:
+                            # compute normal vector
+                            dx = pt1[0] - pt0[0]
+                            dy = pt1[1] - pt0[1]
+                            # touching point of the polygon line segment
+                            px, py = pt
+                            # normalize normal vector
+                            mag = np.sqrt(dx ** 2 + dy ** 2)
+                            dx, dy = dx / mag, dy / mag
+                            # get length from ring thickness
+                            length = 3
+
+                            # axc.plot(px, py, dx, c='green', marker='o', markersize=2)
+                            axc.plot([px, px - dy * length], [py, py + dx * length], c='magenta', lw=1)
+
+                    # draw line from nucleus centroid to point
+                    pt_x, pt_y = r_seg.xy
+                    axc.plot(list(pt_x), list(pt_y), c='gray', lw=0.5)
+
+                #  draw normals of nucleus polygon
+                dx_v, dy_v = np.diff(nucleus.exterior.xy)
+                for dx, dy, (px, py) in zip(dx_v, dy_v, nucleus.exterior.coords):
+                    x = px + dx / 2
+                    y = py + dy / 2
+                    # normalize normal vector
+                    mag = np.sqrt(dx ** 2 + dy ** 2)
+                    dx, dy = dx / mag, dy / mag
+                    length = 1.5
+
+                    # axc.plot(x, y, c='yellow', marker='o', markersize=1)
+                    axc.arrow(x, y, -dy * length, dx * length, color='blue', head_width=0.5, ls='-', lw=0.1)
+
         _m = 30
         x0, xf = nucleus.centroid.x - _m, nucleus.centroid.x + _m
         y0, yf = nucleus.centroid.y - _m, nucleus.centroid.y + _m
@@ -440,6 +494,13 @@ class ConfiguredChannels(Montage):
         for _, cf in c.iterrows():
             self._stack_operation(row, col, fid, c, self._measure_histogram_on_ring)
 
+        # --------------------
+        #     Line intensity
+        # --------------------
+        c = cfg[cfg['pipeline'].apply(lambda l: 'line_intensity_ring' in l)]
+        for _, cf in c.iterrows():
+            self._stack_operation(row, col, fid, c, self._measure_line_intensity)
+
         return self._mdf
 
     def _measure_nuclei(self, nuclei_img, cfg, r=10):
@@ -548,7 +609,7 @@ class ConfiguredChannels(Montage):
         assert self._ix.any(), "no rows in the filtered dataframe"
 
         nuclei = list()
-        for _id, nuc in self._mdf.set_index("id").loc[self._ix, "nuc_pix"].iteritems():
+        for _id, nuc in self._mdf.loc[self._ix, "nuc_pix"].set_index("id").iteritems():
             nuclei.append({"id": _id, "boundary": shapely.wkt.loads(nuc)})
 
         for ix, row in self._mdf[self._ix].iterrows():
@@ -742,3 +803,49 @@ class ConfiguredChannels(Montage):
 
             self._mdf.loc[self._ix, 'hist_edges'] = np.array2string(edges, **_hist_edges_arr_ops)
             self._mdf.loc[self._ix, '%s_rng_hist' % tag] = np.array2string(histogram.astype(int), separator=',')
+
+    def _measure_line_intensity(self, image, cfg):
+        assert self._ix.any(), "no rows in the filtered dataframe"
+        assert "ring_pix" in self._mdf[self._ix], "ring detection step needed"
+
+        tag = cfg['tag'].iloc[0]
+        n_lines = cfg['n_lines'].iloc[0]
+        rng_thick = cfg['rng_thickness'].iloc[0]
+        rng_thick *= self.pix_per_um
+        angle_delta = 2 * np.pi / n_lines
+
+        for ix, row in self._mdf[self._ix].iterrows():
+            _id = row["id"]
+            nucleus = shapely.wkt.loads(row["nuc_pix"])
+            logger.debug("line_intensity for nucleus id %d" % _id)
+
+            minx, miny, maxx, maxy = nucleus.bounds
+            radius = max(maxx - minx, maxy - miny)
+            for k, angle in enumerate([angle_delta * i for i in range(n_lines)]):
+                ray = LineString([nucleus.centroid,
+                                  (nucleus.centroid.x + radius * np.cos(angle),
+                                   nucleus.centroid.y + radius * np.sin(angle))])
+                r_seg = ray.intersection(nucleus)
+                pt = r_seg.coords[-1]
+
+                for pt0, pt1 in m.pairwise(nucleus.exterior.coords):
+                    # if pt.touches(LineString([pt0, pt1])):
+                    if Point(pt).distance(LineString([pt0, pt1])) < 1e-6:
+                        # compute normal vector
+                        dx = pt1[0] - pt0[0]
+                        dy = pt1[1] - pt0[1]
+                        # touching point of the polygon line segment
+                        px, py = pt
+                        # normalize normal vector
+                        mag = np.sqrt(dx ** 2 + dy ** 2)
+                        dx, dy = dx / mag, dy / mag
+
+                        r0, c0, r1, c1 = np.array([px, py, px - dy * rng_thick, py + dx * rng_thick]).astype(int)
+                        lin = LineString([(r0, c0), (r1, c1)])
+                        rr, cc = draw.line(r0, c0, r1, c1)
+
+                        # TODO: Add units support
+                        ix = self._ix & (self._mdf['id'] == _id)
+                        self._mdf.loc[ix, '%s_line_%02d' % (tag, k)] = np.array2string(image[rr, cc], separator=',')
+                        self._mdf.loc[ix, '%s_line_%02d_sum' % (tag, k)] = m.integral_over_line(image, lin).astype(int)
+                        self._mdf.loc[ix, '%s_int_lines' % tag] = int(n_lines)
