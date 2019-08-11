@@ -72,33 +72,35 @@ def histogram(df, edges=None, values=None, agg_fn="sum", edge_min=0, edge_max=np
 
 
 def lines(df):
-    # filter rows with all the profiles meeting the criteria
-    ix1 = df["value"].apply(lambda v: (v < 500).all())
-    ix2 = df["value"].apply(lambda v: (v.max() - v.min()) < 200)
-    # ix3 = a["value"].apply(lambda v: (v.max() - v.min()) > 8000)
-    df.loc[:, "not_quite"] = ix1 | ix2  # | ix3
+    """ filter rows with all the profiles meeting the criteria """
+    # non nan in every line
+    df.loc[:, "nan"] = df["signal"].isna()
+    notna_ix = ~df.groupby(["unit"])["nan"].apply(np.any)
+    notna = df['unit'].isin(notna_ix[notna_ix].index.values)
+    logger.info("before removing units with at least 1 nan signal %d" % len(df))
+    df = df.loc[notna]
+    logger.info("after %d" % len(df))
+    df.drop(columns=["nan"], inplace=True)
+    # df.dropna(axis='index', subset=["x", "x_center", "v_width"], inplace=True)
+
+    # get rid of signals that are too low (either absolute measurements of peak-peak signal)
+    df.loc[:, "not_quite"] = df["signal"].apply(lambda v: (v < 500).all() or (v.max() - v.min()) < 200)
     valid_units_ix = ~df.groupby(["unit"])["not_quite"].apply(np.any)
     valid_units = valid_units_ix[valid_units_ix].index.values
 
-    print("before removing incomplete profiles %d" % len(df))
-    df = df[df['unit'].isin(valid_units)]
-    print("after %d" % len(df))
-
-    # center all the curves on the maximum points
-    minlen = df["value"].apply(lambda v: v.shape[0]).min()
-    df.loc[:, "xpeak"] = df["value"].apply(lambda v: np.argmax(v))
-    df.loc[:, "x"] = df["value"].apply(lambda v: np.arange(start=0, stop=v.shape[0], step=1))
-    df.loc[:, "x_center"] = df["x"] - df["xpeak"]
-    df.drop(columns=["xpeak", "x"], inplace=True)
+    logger.info("before removing incomplete profiles %d" % len(df))
+    df = df.loc[df['unit'].isin(valid_units)]
+    logger.info("after %d" % len(df))
 
     # filter the curves that are too off
+    minlen = df["signal"].apply(lambda v: v.shape[0]).min()
     de = minlen * 0.2
     df.loc[:, "off"] = df.apply(lambda r: (r['x_center'].min() > -de) or (r['x_center'].max() < de), axis=1)
     not_off_ix = ~df.groupby(["unit"])["off"].apply(np.any)
     not_off = not_off_ix[not_off_ix].index.values
-    print("before removing extreme lines %d" % len(df))
-    df = df[df['unit'].isin(not_off)]
-    print("after %d" % len(df))
+    logger.info("before removing extreme lines %d" % len(df))
+    df = df.loc[df['unit'].isin(not_off)]
+    logger.info("after %d" % len(df))
     df.drop(columns=["not_quite", "off"], inplace=True)
 
     return df

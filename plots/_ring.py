@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 import shapely.wkt
+import scipy.signal
 
 from plots.utils import histogram_of_every_row, histogram_with_errorbars
 import operetta as o
@@ -16,7 +17,7 @@ import filters
 
 def eval_into_array(df, column_name):
     if column_name in df:
-        df.loc[:, column_name] = df[column_name].apply(lambda r: np.array(ast.literal_eval(r)))
+        df.loc[:, column_name] = df[column_name].apply(lambda r: np.array(ast.literal_eval(r)) if type(r) == str else r)
     return df
 
 
@@ -44,6 +45,7 @@ class Ring():
 
         self._df = None
         self._lines = None
+        self._lines_filt = None
         self._dmax = None
         self.formatter = EngFormatter(unit='')
 
@@ -66,23 +68,46 @@ class Ring():
 
         self._df = df
 
-        return self._df  # .drop(columns=[''])
+        return self._df
 
     @property
     def lines(self):
         if self._lines is not None: return self._lines
 
-        df = self.df
-        columns = [c for c in df.columns if c[:-2] == "act_line_"]
+        a = self.df
+        columns = [c for c in a.columns if c[:-2] == "act_line_"]
         for c in columns:
-            df = df.pipe(eval_into_array, column_name=c)
-        a = pd.melt(self.df, id_vars=self._cat, value_vars=columns)
+            a = a.pipe(eval_into_array, column_name=c)
+        a = pd.melt(a, id_vars=self._cat, value_vars=columns, value_name='signal')
         a.loc[:, "unit"] = a.apply(lambda r: "%s|%s|%s|%s|%s" % (r['id'], r['row'], r['col'], r['fid'], r['p']), axis=1)
-        a = a.pipe(filters.lines)
+        # calculate the sum of signal intensities
+        a.loc[:, "sum"] = a["signal"].apply(np.sum)
+        a.loc[:, "s_max"] = a["signal"].apply(np.max)
+        # calculate domains of signals (x's) and center all the curves on the maximum points
+        a.loc[:, "xpeak"] = a["signal"].apply(lambda v: np.argmax(v))
+
+        a.loc[:, "x"] = a.loc[~a["signal"].isna(), "signal"].apply(lambda v: np.arange(start=0, stop=len(v), step=1))
+        a.loc[:, "x_center"] = a["x"] - a["xpeak"]
+
+        # calculate width of peaks
+        def _w(r):
+            try:
+                width = scipy.signal.peak_widths(r["signal"], [r["xpeak"]])[0][0]
+            except ValueError as ve:
+                width = np.nan
+            return width
+
+        a.loc[:, "v_width"] = a.loc[~a["signal"].isna()].apply(_w, axis=1)
 
         self._lines = a
 
         return self._lines
+
+    @property
+    def lines_filtered(self):
+        if self._lines_filt is not None: return self._lines_filt
+        self._lines_filt = self.lines.pipe(filters.lines)
+        return self._lines_filt
 
     @property
     def dmax(self):
@@ -290,36 +315,45 @@ class Ring():
         plt.close()
 
     def line_integrals(self):
-        a = self.all
+        for a, kind in zip([self.lines, self.lines_filtered], ["all", "flt"]):
+            # get only one row per z-stack
+            idx = a.groupby(["unit"])["s_max"].transform(max) == a["s_max"]
+            a = a.loc[idx]
 
-        a.loc[:, "unit"] = a.apply(lambda r: "%s|%s|%s|%s|%s" % (r['id'], r['row'], r['col'], r['fid'], r['p']), axis=1)
-        a = a[a["unit"].isin(self.lines["unit"])]
-        columns = [c for c in a.columns if c[:-6] == "act_line_"]
-        dd = pd.melt(self.df, id_vars=self._cat, value_vars=columns)
+            fig = plt.figure(figsize=(8, 8), dpi=150)
+            ax = fig.gca()
+            sns.boxenplot(x="Compound", y="sum", data=a)
+            ax.yaxis.set_major_formatter(self.formatter)
+            ax.set_yscale('log')
+            path = o.ensure_dir(os.path.join(self.cc.base_path, 'out', 'graphs', 'line_boxplot_%s.pdf' % kind))
+            fig.savefig(path)
+            plt.close()
 
-        fig = plt.figure(figsize=(8, 8), dpi=150)
-        ax = fig.gca()
-        # sns.stripplot(x="Compound", y="value", data=dd)
-        sns.boxenplot(x="Compound", y="value", data=dd)
-        ax.yaxis.set_major_formatter(self.formatter)
-        ax.set_yscale('log')
-        path = o.ensure_dir(os.path.join(self.cc.base_path, 'out', 'graphs', 'line_boxplot.pdf'))
-        fig.savefig(path)
-        plt.close()
+            fig = plt.figure(figsize=(8, 8), dpi=150)
+            ax = fig.gca()
+            sns.scatterplot(x="v_width", y="sum", data=a, hue="Compound", alpha=0.1, rasterized=True)
+            # plt.xscale('log')
+            # plt.yscale('log')
+            ax.xaxis.set_major_formatter(self.formatter)
+            ax.yaxis.set_major_formatter(self.formatter)
+            path = o.ensure_dir(os.path.join(self.cc.base_path, 'out', 'graphs', 'lines_scatter_%s.pdf' % kind))
+            fig.savefig(path)
+            plt.close()
 
     def line_measurements(self):
-        a = self.lines
+        a = self.lines_filtered
+        # get only one row per z-stack
+        idx = a.groupby(["unit"])["s_max"].transform(max) == a["s_max"]
+        a = a[idx]
 
         # remove constant component of signal vector
-        # a.loc[:, "value"] = a.apply(lambda r: r['value'] - r['value'].mean(), axis=1)
-        a.loc[:, "crit"] = a['value'].apply(lambda v: v.max() - v.min())
-        a.loc[:, "v_mean"] = a['value'].apply(lambda v: v.min())
-        a.loc[:, "value_n"] = a["value"] - a["v_mean"]
-        a.drop(columns=["v_mean", "value"], inplace=True)
-        print(a)
+        a.loc[:, "crit"] = a['signal'].apply(lambda v: v.max() - v.min())
+        a.loc[:, "v_mean"] = a['signal'].apply(lambda v: v.min())
+        a.loc[:, "signal_n"] = a["signal"] - a["v_mean"]
+        a.drop(columns=["v_mean", "crit", "signal", "x", "sum", "v_width", "xpeak"], inplace=True)
 
-        # transform again into long format (see https://stackoverflow.com/questions/27263805
-        val_col = 'value_n'
+        # transform signal and domain vectors into long format (see https://stackoverflow.com/questions/27263805
+        val_col = 'signal_n'
         ix_col = 'x_center'
         b = pd.DataFrame({
             col: pd.Series(data=np.repeat(a[col].values, a[val_col].str.len()))
@@ -330,18 +364,19 @@ class Ring():
         b = b.set_index(['unit', 'variable'])
         b.index = [b.index.map('{0[0]}|{0[1]}'.format)]
         b = b.reset_index().rename(columns={"level_0": "unit"})
-        print(b)
 
         # plots
         x_var = 'x_center'
-        y_var = 'value_n'
+        y_var = 'signal_n'
 
         g = sns.FacetGrid(b, hue="Compound", row='Compound', height=2, aspect=2)
         g = (g.map_dataframe(sns.lineplot, x=x_var, y=y_var, units='unit', estimator=None, alpha=1, lw=0.1)
              # .set(yscale='log')
              .set(xlim=(-20, 20))
-             # .add_legend()
              )
+        for _ax in g.axes[0]:
+            _ax.xaxis.set_major_formatter(self.formatter)
+            _ax.yaxis.set_major_formatter(self.formatter)
         path = o.ensure_dir(os.path.join(self.cc.base_path, 'out', 'graphs', 'lines_all.pdf'))
         g.savefig(path)
         plt.close()
@@ -363,7 +398,6 @@ class Ring():
 # Histogram of actin ring ratio
 def _distplot(col_lbl, **kwargs):
     ax = plt.gca()
-    print(kwargs)
     data = kwargs.pop("data")
     color = kwargs.pop("color")
     _bins = kwargs.pop("bins")

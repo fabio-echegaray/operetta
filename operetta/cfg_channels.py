@@ -207,7 +207,7 @@ class ConfiguredChannels(Montage):
         fig_general = Figure((max_width * 4 / 150, max_width * 4 / 150), dpi=150)
         canvas_g = FigureCanvas(fig_general)
         # canvas for closeup image
-        fig_closeup = Figure((max_width / 150, max_width / 150), dpi=400)
+        fig_closeup = Figure((max_width / 150, max_width / 150), dpi=150)
         canvas_c = FigureCanvas(fig_closeup)
 
         for _ip, dpos in dfi.groupby('p'):
@@ -254,9 +254,9 @@ class ConfiguredChannels(Montage):
             # ----------------------
             for ix, smp in dpos.groupby('id'):
                 self._render_image_closeup(fig_closeup.gca(), smp, background)
-                name = 'r%d-c%d-f%d-p%s-i%d.jpg' % (row, col, fid, _ip, ix)
+                name = 'r%d-c%d-f%d-p%s-i%d.pdf' % (row, col, fid, _ip, ix)
                 fpath = os.path.abspath(os.path.join(basepath, name))
-                canvas_to_pil(canvas_c).save(ensure_dir(fpath))
+                fig_closeup.savefig(fpath)
 
     def _render_image(self, axg, df_row, bkg_img):
         w_um, h_um, _ = [s * self.um_per_pix for s in bkg_img.shape]
@@ -861,5 +861,11 @@ class ConfiguredChannels(Montage):
                         # TODO: Add units support
                         ix = self._ix & (self._mdf['id'] == _id)
                         self._mdf.loc[ix, '%s_line_%02d' % (tag, k)] = np.array2string(image[rr, cc], separator=',')
-                        self._mdf.loc[ix, '%s_line_%02d_sum' % (tag, k)] = m.integral_over_line(image, lin).astype(int)
+                        # self._mdf.loc[ix, '%s_line_%02d_sum' % (tag, k)] = m.integral_over_line(image, lin).astype(int)
                         self._mdf.loc[ix, '%s_int_lines' % tag] = int(n_lines)
+
+                        # lin = r_seg
+                        r0, c0, r1, c1 = np.array(r_seg).flatten().astype(int)
+                        rr, cc = draw.line(r0, c0, r1, c1)
+                        self._mdf.loc[ix, '%s_nuc_line_%02d' % (tag, k)] = np.array2string(image[rr, cc], separator=',')
+                        # self._mdf.loc[ix, '%s_nuc_line_%02d_sum' % (tag, k)] = m.integral_over_line(image, lin).astype(int)

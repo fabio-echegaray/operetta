@@ -11,7 +11,8 @@ import operetta as o
 from plots import Ring
 
 pd.set_option('display.width', 320)
-pd.set_option('display.max_columns', 20)
+pd.set_option('display.max_columns', 30)
+pd.set_option('display.max_rows', 50)
 
 logger = logging.getLogger('ring')
 logger.setLevel(logging.DEBUG)
@@ -34,13 +35,13 @@ def select_images(df, operetta_folder, method="copy"):
 
         try:
             if method == "link":
-                logger.info('linking %s to %s' % (name, destination_folder))
+                logger.debug('linking %s to %s' % (name, destination_folder))
                 os.symlink(original_path, destination_path, False)
             elif method == "copy":
-                logger.info('copying %s to %s' % (name, destination_folder))
+                logger.debug('copying %s to %s' % (name, destination_folder))
                 copyfile(original_path, destination_path)
             elif method == "move":
-                logger.info('moving %s to %s' % (name, destination_folder))
+                logger.debug('moving %s to %s' % (name, destination_folder))
                 os.rename(original_path, destination_path)
             bar.update()
         except Exception as e:
@@ -64,7 +65,7 @@ if __name__ == '__main__':
     operetta = o.ConfiguredChannels(args.folder)
     pl = Ring(operetta)
 
-    select_images(pl.lines, operetta.base_path)
+    select_images(pl.lines_filtered, operetta.base_path)
     # exit(0)
 
     # pl.nuclei_filtered()
