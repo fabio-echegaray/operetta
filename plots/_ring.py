@@ -334,6 +334,8 @@ class Ring():
             sns.scatterplot(x="v_width", y="sum", data=a, hue="Compound", alpha=0.1, rasterized=True)
             # plt.xscale('log')
             # plt.yscale('log')
+            ax.set_xlim((0, 16))
+            ax.set_ylim((0, 350e3))
             ax.xaxis.set_major_formatter(self.formatter)
             ax.yaxis.set_major_formatter(self.formatter)
             path = o.ensure_dir(os.path.join(self.cc.base_path, 'out', 'graphs', 'lines_scatter_%s.pdf' % kind))
@@ -348,7 +350,7 @@ class Ring():
 
         # remove constant component of signal vector
         a.loc[:, "crit"] = a['signal'].apply(lambda v: v.max() - v.min())
-        a.loc[:, "v_mean"] = a['signal'].apply(lambda v: v.min())
+        a.loc[:, "v_mean"] = a['signal'].apply(lambda v: v.mean())
         a.loc[:, "signal_n"] = a["signal"] - a["v_mean"]
         a.drop(columns=["v_mean", "crit", "signal", "x", "sum", "v_width", "xpeak"], inplace=True)
 

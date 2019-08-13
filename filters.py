@@ -73,6 +73,7 @@ def histogram(df, edges=None, values=None, agg_fn="sum", edge_min=0, edge_max=np
 
 def lines(df):
     """ filter rows with all the profiles meeting the criteria """
+    # df = df.loc[(df["sum"] < 75e3) & (df["v_width"] < 8)]
     # non nan in every line
     df.loc[:, "nan"] = df["signal"].isna()
     notna_ix = ~df.groupby(["unit"])["nan"].apply(np.any)
@@ -84,7 +85,7 @@ def lines(df):
     # df.dropna(axis='index', subset=["x", "x_center", "v_width"], inplace=True)
 
     # get rid of signals that are too low (either absolute measurements of peak-peak signal)
-    df.loc[:, "not_quite"] = df["signal"].apply(lambda v: (v < 500).all() or (v.max() - v.min()) < 200)
+    df.loc[:, "not_quite"] = df["signal"].apply(lambda v: v.max() - v.min() < 200)
     valid_units_ix = ~df.groupby(["unit"])["not_quite"].apply(np.any)
     valid_units = valid_units_ix[valid_units_ix].index.values
 

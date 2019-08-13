@@ -65,7 +65,12 @@ if __name__ == '__main__':
     operetta = o.ConfiguredChannels(args.folder)
     pl = Ring(operetta)
 
-    select_images(pl.lines_filtered, operetta.base_path)
+    a = pl.lines_filtered
+    # get only one row per z-stack
+    idx = a.groupby(["unit"])["s_max"].transform(max) == a["s_max"]
+    a = a[idx]
+
+    select_images(a, operetta.base_path)
     # exit(0)
 
     # pl.nuclei_filtered()
