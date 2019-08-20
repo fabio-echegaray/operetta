@@ -1,14 +1,19 @@
+import logging
 import matplotlib
 import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker
 from matplotlib.path import Path
 from matplotlib.patches import PathPatch
-from shapely.geometry import Polygon
 from matplotlib.ticker import EngFormatter
+from shapely.geometry import Polygon
 import numpy as np
 import matplotlib.colors as mcolors
 from numpy import asarray, concatenate, ones
 
 matplotlib.rcParams['hatch.linewidth'] = 0.1
+
+logger = logging.getLogger('plots')
+logger.setLevel(logging.DEBUG)
 
 
 class colors():
@@ -127,3 +132,66 @@ def render_polygon(polygon: Polygon, zorder=0, ax=None):
 
     ax.add_patch(patch)
     ax.set_aspect(1.0)
+
+
+def histogram_of_every_row(counts_col, **kwargs):
+    """
+    Plots the histogram of every row in a dataframe, overlaying them.
+    Meant to be used within a map_dataframe call.
+
+    Implementation inspired in https://matplotlib.org/gallery/api/histogram_path.html
+
+    :param df: Dataframe
+    :param counts_col: Name of the counts column
+    :param edges_col: Name of the edges column
+    :param ax: Matplotlib axis object
+    :return:
+    """
+    ax = plt.gca()
+    edges_col = kwargs.pop("edges_col") if "edges_col" in kwargs else "hist_edges"
+    data = kwargs.pop("data")
+    color = kwargs.pop("color")
+    label = kwargs.pop("label") if "label" in kwargs else None
+
+    # FIXME: Find a way to increase opacity resolution
+    min_op = 1. / 256.
+    opacity = 1. / len(data)
+    opacity = opacity if opacity >= min_op else min_op
+    logger.info("plotting %d histograms overlaid with opacity %e." % (len(data), opacity))
+
+    # get the corners of the rectangles for the histogram
+    bins = data[edges_col].iloc[0]
+    left = np.array(bins[:-1])
+    right = np.array(bins[1:])
+    bottom = np.zeros(len(left))
+
+    for _ix, _d in data.iterrows():
+        counts = _d[counts_col]
+        top = bottom + counts
+
+        # function to build a compound path
+        XY = np.array([[left, left, right, right], [bottom, top, top, bottom]]).T
+
+        # get the Path object
+        barpath = Path.make_compound_path_from_polys(XY)
+
+        # make a patch out of it
+        patch = PathPatch(barpath, alpha=opacity, lw=0, color=color)
+        ax.add_patch(patch)
+
+    ax.xaxis.set_major_locator(ticker.LogLocator(base=10))
+    ax.xaxis.set_major_formatter(ticker.LogFormatterMathtext(base=10))
+    ax.yaxis.set_major_formatter(EngFormatter(unit=''))
+    ax.set_xlim(left[0], right[-1])
+    ax.set_ylim(bottom.min(), data[counts_col].apply(lambda r: np.max(r)).max())
+
+
+def histogram_with_errorbars(df, edges_col, value_col, ax=None):
+    if ax is None:
+        ax = plt.gca()
+
+    edges = df[edges_col].iloc[0]
+    rng_avg = df[value_col].mean()
+    rng_std = np.std(df[value_col].values, axis=0)
+    bincenters = 0.5 * (edges[1:] + edges[:-1])
+    plt.bar(bincenters, rng_avg, width=np.diff(edges), yerr=rng_std, error_kw={"elinewidth": 1})

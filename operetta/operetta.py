@@ -3,7 +3,6 @@ import xml.etree.ElementTree
 import json
 import re
 
-import matplotlib
 import numpy as np
 import pandas as pd
 from skimage import io
@@ -12,8 +11,6 @@ import skimage.exposure as exposure
 from .exceptions import ImagesFolderNotFound
 from . import logger
 from gui import convert_to, meter, pix, um
-
-matplotlib.use("agg")
 
 
 def ensure_dir(file_path):
@@ -233,36 +230,40 @@ class Montage:
         return self._layout
 
     def _generate_sample_image(self):
-        from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
-        from matplotlib.figure import Figure
-        from gui.utils import canvas_to_pil
+        import seaborn as sns
+        import matplotlib.pyplot as plt
+
+        def _img(img, **kwargs):
+            ax = plt.gca()
+            ax.imshow(img.iloc[0], extent=[0, w_um, h_um, 0], cmap='gray')
 
         logger.debug("Generating sample image...")
         cfg_ch = self.files.groupby(['ch', 'ChannelName']).size().reset_index().drop(0, axis=1)
-        max_ch = cfg_ch['ch'].max()
         images = self.max_projection(np.random.randint(len(self.files_gr)))
 
-        width, height = images[0].shape
         w_um, h_um = [s * self.um_per_pix for s in images[0].shape]
-        fig = Figure((width * 4 / 150, width * 4 / 150), dpi=150)
-        canvas_g = FigureCanvas(fig)
 
+        im_df = pd.DataFrame()
         for i in range(4):
             images = self.max_projection(np.random.randint(len(self.files_gr)))
             images = [exposure.equalize_hist(im) for im in images]
-
             for im, ch, title in zip(images, cfg_ch['ch'], cfg_ch['ChannelName']):
-                sp = i * max_ch + ch
-                ax = fig.add_subplot(4, max_ch, sp)
-                ax.imshow(im, extent=[0, w_um, h_um, 0], cmap='gray')
-                ax.set_xlim([0, w_um])
-                ax.set_ylim([0, h_um])
-                ax.set_axis_off()
-                ax.set_title(title)
+                d = pd.DataFrame(data={
+                    'example': [i],
+                    'channel': [ch],
+                    'name': [title],
+                    'image': [im],
+                })
+                im_df = im_df.append(d, ignore_index=True, sort=False)
 
-        pil = canvas_to_pil(canvas_g)
+        g = sns.FacetGrid(im_df, row="example", col="name", height=4)
+        g = (g.map(_img, "image")
+             .set_titles("{col_name}")
+             .add_legend()
+             )
+
         fpath = os.path.abspath(os.path.join(self.base_path, 'out', 'sample.jpg'))
-        pil.save(ensure_dir(fpath))
+        g.savefig(fpath)
 
     def flat_field_profile(self):
         for root, directories, filenames in os.walk(self.ffc_path):

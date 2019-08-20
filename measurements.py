@@ -14,7 +14,7 @@ import skimage.measure as measure
 import skimage.morphology as morphology
 import skimage.segmentation as segmentation
 import skimage.transform as tf
-from shapely.geometry.polygon import Polygon
+from shapely.geometry import Polygon, LineString
 from scipy.ndimage.morphology import distance_transform_edt
 
 logging.basicConfig(level=logging.DEBUG)
@@ -65,6 +65,13 @@ def eng_string(x, format='%s', si=False):
     return ('%s' + format + '%s') % (sign, x3, exp3_text)
 
 
+def pairwise(iterable):
+    "s -> (s0,s1), (s1,s2), (s2, s3), ..."
+    a, b = itertools.tee(iterable)
+    next(b, None)
+    return zip(a, b)
+
+
 def integral_over_surface(image, polygon: Polygon):
     assert polygon.is_valid, "Polygon is invalid"
 
@@ -79,6 +86,38 @@ def integral_over_surface(image, polygon: Polygon):
         return ss
     except Exception:
         logger.warning('integral_over_surface measured incorrectly')
+        return np.nan
+
+
+def histogram_of_surface(image, polygon: Polygon, bins=None):
+    assert polygon.is_valid, "Polygon is invalid"
+
+    try:
+        hh = np.zeros(shape=image.shape, dtype=np.bool)
+        c, r = polygon.exterior.xy
+        rr, cc = draw.polygon(r, c)
+        hh[rr, cc] = True
+        for interior in polygon.interiors:
+            c, r = interior.xy
+            rr, cc = draw.polygon(r, c)
+            hh[rr, cc] = False
+        hist, edges = np.histogram(image[hh].ravel(), bins)
+        return hist, edges
+    except Exception:
+        logger.warning('histogram_of_surface measured incorrectly')
+        return np.nan, np.nan
+
+
+def integral_over_line(image, line: LineString):
+    assert line.is_valid, "LineString is invalid"
+    try:
+        for pt0, pt1 in pairwise(line.coords):
+            r0, c0, r1, c1 = np.array(list(pt0) + list(pt1)).astype(int)
+            rr, cc = draw.line(r0, c0, r1, c1)
+            ss = np.sum(image[rr, cc])
+            return ss
+    except Exception:
+        logger.warning('integral_over_line measured incorrectly')
         return np.nan
 
 

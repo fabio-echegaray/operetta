@@ -1,13 +1,10 @@
-import configparser
-import json
 import logging
 import os
 import warnings
+import enlighten
 
 from pandas.errors import EmptyDataError
-
 import filters
-import operetta as o
 
 logger = logging.getLogger('batch')
 logger.setLevel(logging.DEBUG)
@@ -18,37 +15,39 @@ logging.getLogger('shapely').setLevel(logging.ERROR)
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
 
-def collect(path):
+def collect(path, csv_fname="nuclei.pandas.csv"):
     df = pd.DataFrame()
-    for root, directories, filenames in os.walk(os.path.join(path)):
-        for filename in filenames:
+    cols_to_delete = ['nucleus', 'nuc_pix', 'cell', 'cell_pix', 'ring', 'ring_pix']
+    manager = enlighten.get_manager()
+
+    csv_file = os.path.join(path, csv_fname)
+    if os.path.isfile(csv_file):
+        os.remove(csv_file)
+
+    for root, directories, filenames in os.walk(os.path.join(path, "pandas")):
+        bar = manager.counter(total=len(filenames), desc='Progress', unit='files')
+        for k, filename in enumerate(filenames):
             ext = filename.split('.')[-1]
             if ext == 'csv':
+                logger.info("adding %s" % filename)
                 try:
-                    csv = pd.read_csv(os.path.join(root, filename))
-                    df = df.append(csv, ignore_index=True)
+                    csv = (pd.read_csv(os.path.join(root, filename))
+                           .pipe(filters.cell)
+                           .pipe(filters.nucleus, radius_min=4, radius_max=10)
+                           .pipe(filters.polsby_popper, column="nucleus")
+                           )
+                    csv = csv.drop(columns=[c for c in cols_to_delete if c in csv])
+                    with open(csv_file, 'a') as f:
+                        csv.to_csv(f, mode='a', header=not f.tell())
+
                 except EmptyDataError:
                     logger.warning('found empty csv file: %s' % filename)
+                except ValueError:
+                    logger.warning('weird... maybe empty output after filter? in %s' % filename)
                     # traceback.print_stack()
-
+            bar.update()
+    manager.stop()
     return df
-
-
-def wells_config(fname):
-    logging.info('parsing wells.cfg')
-    if os.path.isfile(fname):
-        with open(fname, 'r') as configfile:
-            config = configparser.ConfigParser(strict=False)
-            config.read_file(configfile)
-
-            logging.debug('sections found in file ' + str(config.sections()))
-
-            for section in config.sections():
-                if section[:3] == 'Tag':
-                    name = config.get(section, 'name')
-                    rows = json.loads(config.get(section, 'rows'))
-                    cols = json.loads(config.get(section, 'cols'))
-                    yield name, rows, cols
 
 
 if __name__ == '__main__':
@@ -109,12 +108,4 @@ if __name__ == '__main__':
         for root, directories, filenames in os.walk(os.path.join(args.folder, 'out')):
             pd_path = os.path.join(root, 'pandas')
             if os.path.isdir(pd_path):
-                df = collect(pd_path)
-                if os.path.exists(well_cfg_path):
-                    for name, rows, cols in wells_config(well_cfg_path):
-                        cnd = df[(df['row'].isin(rows)) & (df['col'].isin(cols))]
-                        cnd_path = o.ensure_dir(os.path.join(root, name, 'nuclei.pandas'))
-                        pd.to_pickle(cnd, cnd_path)
-                else:
-                    df = df.pipe(filters.cell)
-                    pd.to_pickle(df, os.path.join(root, 'nuclei.pandas'))
+                df = collect(root)
