@@ -4,6 +4,7 @@ import configparser
 
 from skimage import color
 from skimage import exposure
+from skimage import draw
 import shapely.wkt
 import numpy as np
 import pandas as pd
@@ -11,13 +12,17 @@ from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from matplotlib.figure import Figure
 from shapely.geometry.point import Point
 from shapely import affinity
-from shapely.geometry.polygon import Polygon
+from shapely.wkt import dumps
+from shapely.geometry import LineString, MultiLineString, Polygon
 
 from plots import utils as p
 import measurements as m
 from .exceptions import ImagesFolderNotFound, NoSamplesError
 from . import Montage, ensure_dir, logger
 from gui.utils import canvas_to_pil
+
+_hist_edges_arr_ops = {"precision": 2, "separator": ",", "suppress_small": True,
+                       "formatter": {"float": lambda x: "%0.2f" % x}}
 
 
 class ConfiguredChannels(Montage):
@@ -93,6 +98,11 @@ class ConfiguredChannels(Montage):
                             'tag': config.get(section, 'tag'),
                             'pipeline': ast.literal_eval(config.get(section, 'pipeline')),
                             'rng_thickness': config.getfloat(section, 'rng_thickness', fallback=0),
+                            'n_lines': config.getint(section, 'n_lines', fallback=3),
+                            'hist_bins': config.getint(section, 'hist_bins', fallback=10),
+                            'hist_min': config.getint(section, 'hist_min', fallback=0),
+                            'hist_max': config.getint(section, 'hist_max', fallback=np.iinfo(np.uint16).max),
+                            'hist_log': config.getboolean(section, 'hist_log', fallback=False),
                             'render': config.getboolean(section, 'render'),
                             'render intensity': config.getfloat(section, 'render intensity'),
                             'flatfield': config.getboolean(section, 'flat field correction')
@@ -104,16 +114,28 @@ class ConfiguredChannels(Montage):
             config = configparser.RawConfigParser(allow_no_value=True)
             config.add_section('Information')
             config.set('Information', '#')
-            config.set('Information', '# allowed functions for the pipeline are: nucleus, cell, '
-                                      'intensity_in_nucleus, ring_around_nucleus, particle_in_cytoplasm')
+            config.set('Information', '# allowed functions for the pipeline are: nucleus, cell, histogram, ')
+            config.set('Information', '#        intensity_in_nucleus, ring_around_nucleus, particle_in_cytoplasm,')
+            config.set('Information', '#        line_intensity_ring, histogram_of_nucleus, histogram_of_ring.')
+            config.set('Information', '#')
             config.set('Information', '#')
             config.set('Information', '# Accepted parameters:')
-            config.set('Information', '#     for z_stack_aggregation:')
+            config.set('Information', '#     for z_stack_aggregation on every Channel: Aggregation op to do on ')
+            config.set('Information', '#     the z-stack. Can be one of the following:')
             config.set('Information', '#         use each image individually')
             config.set('Information', '#         do a max projection')
             config.set('Information', '#')
             config.set('Information', '#     for ring_around_nucleus:')
             config.set('Information', '#         rng_thickness: Thickness of the ring, in um.')
+            config.set('Information', '#')
+            config.set('Information', '#     for histogram:')
+            config.set('Information', '#         hist_bins: Number of bins to use.')
+            config.set('Information', '#         hist_min: Lower boundary for bins.')
+            config.set('Information', '#         hist_max: Upper boundary for bins.')
+            config.set('Information', '#         hist_log: Makes bin to look equally sized on a log scale.')
+            config.set('Information', '#')
+            config.set('Information', '#     for line_intensity_ring:')
+            config.set('Information', '#         n_lines: Number of lines to measure.')
             config.set('Information', '#')
             config.set('Information', '#')
 
@@ -126,9 +148,15 @@ class ConfiguredChannels(Montage):
                 config.add_section(section)
                 config.set(section, 'number', c - 1)
                 config.set(section, 'channel name', self.files.loc[self.files['ch'] == c, 'ChannelName'].iloc[0])
-                config.set(section, 'z_stack_aggregation', 'use each image individually')
                 config.set(section, 'tag', 'default')
                 config.set(section, 'pipeline', [])
+                config.set(section, 'z_stack_aggregation', 'do a max projection')
+                config.set(section, 'rng_thickness', 3)
+                config.set(section, 'n_lines', 3)
+                config.set(section, 'hist_bins', 100)
+                config.set(section, 'hist_min', 0)
+                config.set(section, 'hist_max', np.iinfo(np.uint16).max)
+                config.set(section, 'hist_log', True)
                 config.set(section, 'render', False)
                 config.set(section, 'render intensity', 0.1)
                 config.set(section, 'flat field correction', True)
@@ -226,9 +254,9 @@ class ConfiguredChannels(Montage):
             # ----------------------
             for ix, smp in dpos.groupby('id'):
                 self._render_image_closeup(fig_closeup.gca(), smp, background)
-                name = 'r%d-c%d-f%d-p%s-i%d.jpg' % (row, col, fid, _ip, ix)
+                name = 'r%d-c%d-f%d-p%s-i%d.pdf' % (row, col, fid, _ip, ix)
                 fpath = os.path.abspath(os.path.join(basepath, name))
-                canvas_to_pil(canvas_c).save(ensure_dir(fpath))
+                fig_closeup.savefig(fpath)
 
     def _render_image(self, axg, df_row, bkg_img):
         w_um, h_um, _ = [s * self.um_per_pix for s in bkg_img.shape]
@@ -284,6 +312,58 @@ class ConfiguredChannels(Montage):
             ring = shapely.wkt.loads(smp['ring'].iloc[0])
             if ring.area > 0:
                 p.render_polygon(ring, zorder=10, ax=axc)
+
+            #  draw measured lines
+            if "act_int_lines" in smp and not np.isnan(smp['act_int_lines'].iloc[0]):
+                n_lines = int(smp['act_int_lines'].iloc[0])
+                angle_delta = 2 * np.pi / n_lines
+                minx, miny, maxx, maxy = nucleus.bounds
+                radius = max(maxx - minx, maxy - miny)
+                for angle in [angle_delta * i for i in range(n_lines)]:
+                    ray = LineString([nucleus.centroid,
+                                      (nucleus.centroid.x + radius * np.cos(angle),
+                                       nucleus.centroid.y + radius * np.sin(angle))])
+                    r_seg = ray.intersection(nucleus)
+                    if r_seg.is_empty:
+                        continue
+                    if type(r_seg) == MultiLineString:
+                        r_seg = r_seg[0]
+                    pt = Point(r_seg.coords[-1])
+
+                    for pt0, pt1 in m.pairwise(nucleus.exterior.coords):
+                        # if pt.touches(LineString([pt0, pt1])):
+                        if Point(pt).distance(LineString([pt0, pt1])) < 1e-6:
+                            # compute normal vector
+                            dx = pt1[0] - pt0[0]
+                            dy = pt1[1] - pt0[1]
+                            # touching point of the polygon line segment
+                            px, py = pt.x, pt.y
+                            # normalize normal vector
+                            mag = np.sqrt(dx ** 2 + dy ** 2)
+                            dx, dy = dx / mag, dy / mag
+                            # get length from ring thickness
+                            length = 3
+
+                            # axc.plot(px, py, dx, c='green', marker='o', markersize=2)
+                            axc.plot([px, px - dy * length], [py, py + dx * length], c='magenta', lw=1)
+
+                    # draw line from nucleus centroid to point
+                    pt_x, pt_y = r_seg.xy
+                    axc.plot(list(pt_x), list(pt_y), c='gray', lw=0.5)
+
+                #  draw normals of nucleus polygon
+                dx_v, dy_v = np.diff(nucleus.exterior.xy)
+                for dx, dy, (px, py) in zip(dx_v, dy_v, nucleus.exterior.coords):
+                    x = px + dx / 2
+                    y = py + dy / 2
+                    # normalize normal vector
+                    mag = np.sqrt(dx ** 2 + dy ** 2)
+                    dx, dy = dx / mag, dy / mag
+                    length = 1.5
+
+                    # axc.plot(x, y, c='yellow', marker='o', markersize=1)
+                    axc.arrow(x, y, -dy * length, dx * length, color='blue', head_width=0.5, ls='-', lw=0.1)
+
         _m = 30
         x0, xf = nucleus.centroid.x - _m, nucleus.centroid.x + _m
         y0, yf = nucleus.centroid.y - _m, nucleus.centroid.y + _m
@@ -401,6 +481,29 @@ class ConfiguredChannels(Montage):
         assert len(c) < 2, 'only one particle_in_cytoplasm step per batch allowed'
         if len(c) == 1:
             assert self.cells_measured, 'particle_in_cytoplasm needs cell data'
+            self._stack_operation(row, col, fid, c, self._measure_particle_in_cytoplasm)
+
+        # --------------------
+        #     Histogram
+        # --------------------
+        c = cfg[cfg['pipeline'].apply(lambda l: 'histogram' in l)]
+        for _, cf in c.iterrows():
+            self._stack_operation(row, col, fid, c, self._measure_histogram)
+
+        c = cfg[cfg['pipeline'].apply(lambda l: 'histogram_of_nucleus' in l)]
+        for _, cf in c.iterrows():
+            self._stack_operation(row, col, fid, c, self._measure_histogram_on_nucleus)
+
+        c = cfg[cfg['pipeline'].apply(lambda l: 'histogram_of_ring' in l)]
+        for _, cf in c.iterrows():
+            self._stack_operation(row, col, fid, c, self._measure_histogram_on_ring)
+
+        # --------------------
+        #     Line intensity
+        # --------------------
+        c = cfg[cfg['pipeline'].apply(lambda l: 'line_intensity_ring' in l)]
+        for _, cf in c.iterrows():
+            self._stack_operation(row, col, fid, c, self._measure_line_intensity)
 
         return self._mdf
 
@@ -413,7 +516,15 @@ class ConfiguredChannels(Montage):
             return
 
         for nucleus in nuclei:
-            nucl_bnd = nucleus['boundary']
+            nucl_bnd = (nucleus['boundary']
+                        .buffer(self.pix_per_um, join_style=1)
+                        .buffer(-self.pix_per_um, join_style=1)
+                        .simplify(self.pix_per_um / 2, preserve_topology=True)
+                        )
+            if nucl_bnd.is_empty: continue
+            logger.debug("previous simplify %d, after %d" %
+                         (len(nucleus['boundary'].exterior.coords), len(nucl_bnd.exterior.coords)))
+            if nucl_bnd.area < np.pi * (3 * self.pix_per_um) ** 2: continue
             dna_int = m.integral_over_surface(nuclei_img, nucl_bnd)
 
             # convert everything to um space for dataframe construction
@@ -426,10 +537,10 @@ class ConfiguredChannels(Montage):
                 'col': [self._col],
                 'fid': [self._fid],
                 'p': [self._zp],
-                'dna_int': [dna_int],
-                'dna_dens': [dna_int / nucl_bnd.area],
-                'nucleus': n_bum.wkt,
-                'nuc_pix': nucl_bnd.wkt,
+                '%s_int' % cfg['tag'].iloc[0]: [int(dna_int)],
+                '%s_dens' % cfg['tag'].iloc[0]: [int(dna_int / nucl_bnd.area)],
+                'nucleus': dumps(n_bum, rounding_precision=4),
+                'nuc_pix': dumps(nucl_bnd, rounding_precision=1),
             })
             self._mdf = self._mdf.append(d, ignore_index=True, sort=False)
         logger.debug("%d nuclei found in image" % len(nuclei))
@@ -457,7 +568,14 @@ class ConfiguredChannels(Montage):
         # iterate through all cells
         for cl in cells:
             logger.debug("processing cell id %d" % cl['id'])
-            cell_bnd = cl['boundary']
+            cell_bnd = (cl['boundary']
+                        .buffer(self.pix_per_um, join_style=1)
+                        .buffer(-self.pix_per_um, join_style=1)
+                        .simplify(self.pix_per_um / 2, preserve_topology=True)
+                        )
+            logger.debug("previous simplify %d, after %d" %
+                         (len(cl['boundary'].exterior.coords), len(cell_bnd.exterior.coords)))
+
             for _id, nucleus in self._mdf.loc[self._ix, "nuc_pix"]:
                 valid_sample, reason = m.is_valid_sample(frame, cell_bnd, nucleus, nuclei)
                 if reason == m.REJECTION_TOUCHING_FRAME: touching_fr += 1
@@ -479,10 +597,10 @@ class ConfiguredChannels(Montage):
 
                     # TODO: Add units support
                     ix = self._ix & (self._mdf['id'] == nucleus['id'])
-                    self._mdf.loc[ix, 'tubulin_int'] = tubulin_int
-                    self._mdf.loc[ix, 'tubulin_dens'] = tubulin_int / cell_bnd.area
-                    self._mdf.loc[ix, 'cell'] = c_bum.wkt
-                    self._mdf.loc[ix, 'cell_pix'] = cell_bnd.wkt
+                    self._mdf.loc[ix, 'tubulin_int'] = int(tubulin_int)
+                    self._mdf.loc[ix, 'tubulin_dens'] = int(tubulin_int / cell_bnd.area)
+                    self._mdf.loc[ix, 'cell'] = dumps(c_bum, rounding_precision=4)
+                    self._mdf.loc[ix, 'cell_pix'] = dumps(cell_bnd, rounding_precision=1)
 
         logger.info("%d samples rejected because they were touching the frame" % touching_fr)
         logger.info("%d samples rejected because cell didn't have a nucleus" % no_nuclei)
@@ -495,7 +613,7 @@ class ConfiguredChannels(Montage):
         assert self._ix.any(), "no rows in the filtered dataframe"
 
         nuclei = list()
-        for _id, nuc in self._mdf.set_index("id").loc[self._ix, "nuc_pix"].iteritems():
+        for _id, nuc in self._mdf.loc[self._ix, "nuc_pix"].set_index("id").iteritems():
             nuclei.append({"id": _id, "boundary": shapely.wkt.loads(nuc)})
 
         for ix, row in self._mdf[self._ix].iterrows():
@@ -507,8 +625,8 @@ class ConfiguredChannels(Montage):
             signal_density = signal_int / nucl_bnd.area
 
             # TODO: scale intensity from pixels^2 to um^2
-            self._mdf.loc[ix, '%s_int' % cfg['tag'].iloc[0]] = signal_int
-            self._mdf.loc[ix, '%s_dens' % cfg['tag'].iloc[0]] = signal_density
+            self._mdf.loc[ix, '%s_int' % cfg['tag'].iloc[0]] = int(signal_int)
+            self._mdf.loc[ix, '%s_dens' % cfg['tag'].iloc[0]] = int(signal_density)
 
     def _measure_ring_intensity_around_nucleus(self, image, cfg):
         assert self._ix.any(), "no rows in the filtered dataframe"
@@ -516,7 +634,11 @@ class ConfiguredChannels(Montage):
             nucl_bnd = shapely.wkt.loads(row["nuc_pix"])
             thickness = float(cfg['rng_thickness'])
             thickness *= self.pix_per_um
-            rng_bnd = nucl_bnd.buffer(thickness).difference(nucl_bnd)
+            rng_bnd = (nucl_bnd
+                       .buffer(thickness)
+                       .difference(nucl_bnd)
+                       .simplify(self.pix_per_um / 2, preserve_topology=True)
+                       )
             if rng_bnd.area > 0:
                 rng_int = m.integral_over_surface(image, rng_bnd)
                 if np.isnan(rng_int): continue
@@ -530,9 +652,10 @@ class ConfiguredChannels(Montage):
             rng_um = affinity.scale(rng_bnd, xfact=self.um_per_pix, yfact=self.um_per_pix, origin=(0, 0, 0))
 
             # TODO: scale intensity from pixels^2 to um^2
-            self._mdf.loc[ix, 'ring'] = rng_um.wkt
-            self._mdf.loc[ix, '%s_rng_int' % cfg['tag'].iloc[0]] = rng_int
-            self._mdf.loc[ix, '%s_rng_dens' % cfg['tag'].iloc[0]] = rng_density
+            self._mdf.loc[ix, 'ring'] = dumps(rng_um, rounding_precision=4)
+            self._mdf.loc[ix, 'ring_pix'] = dumps(rng_bnd, rounding_precision=1)
+            self._mdf.loc[ix, '%s_rng_int' % cfg['tag'].iloc[0]] = int(rng_int)
+            self._mdf.loc[ix, '%s_rng_dens' % cfg['tag'].iloc[0]] = int(rng_density)
             # logger.debug("\r\n" + str(self._mdf[ix]))
 
     def _measure_particle_in_cytoplasm(self, image, cfg):
@@ -609,3 +732,140 @@ class ConfiguredChannels(Montage):
         #     # u_pericentrin = np.mean(_img[cells_mask])
         #     self._mdf['snr_c1'] = self._mdf['c1_int'].apply(lambda i: i / std_pericentrin if not np.isnan(i) else np.nan)
         #     self._mdf['snr_c2'] = self._mdf['c2_int'].apply(lambda i: i / std_pericentrin if not np.isnan(i) else np.nan)
+
+    def _measure_histogram(self, image, cfg):
+        n_bins = cfg['hist_bins'].iloc[0]
+        min = cfg['hist_min'].iloc[0]
+        max = cfg['hist_max'].iloc[0]
+        tag = cfg['tag'].iloc[0]
+        log_bins = cfg['hist_log'].iloc[0]
+        if log_bins:
+            bins = np.logspace(np.log10(1 if min == 0 else min), np.log10(max), n_bins)
+        else:
+            bins = np.linspace(min, max, n_bins)
+        histogram, edges = np.histogram(image.ravel(), bins)
+
+        if self._ix.any():
+            self._mdf.loc[self._ix, 'hist_edges'] = np.array2string(edges, **_hist_edges_arr_ops)
+            self._mdf.loc[self._ix, '%s_hist' % tag] = np.array2string(histogram.astype(int), separator=',')
+        else:
+            d = pd.DataFrame(data={
+                'id': [None],
+                'row': [self._row],
+                'col': [self._col],
+                'fid': [self._fid],
+                'p': [self._zp],
+                'hist_edges': [np.array2string(edges, **_hist_edges_arr_ops)],
+                '%s_hist' % tag: [np.array2string(histogram.astype(int), separator=',')],
+            })
+            self._mdf = self._mdf.append(d, ignore_index=True, sort=False)
+
+    def _measure_histogram_on_nucleus(self, image, cfg):
+        assert self._ix.any(), "no rows in the filtered dataframe"
+        assert "nuc_pix" in self._mdf[self._ix], "nucleus detection step needed"
+
+        n_bins = cfg['hist_bins'].iloc[0]
+        min = cfg['hist_min'].iloc[0]
+        max = cfg['hist_max'].iloc[0]
+        tag = cfg['tag'].iloc[0]
+        log_bins = cfg['hist_log'].iloc[0]
+        if log_bins:
+            bins = np.logspace(np.log10(1 if min == 0 else min), np.log10(max), n_bins)
+        else:
+            bins = np.linspace(min, max, n_bins)
+
+        for ix, row in self._mdf[self._ix].iterrows():
+            _id = row["id"]
+            nucl_bnd = shapely.wkt.loads(row["nuc_pix"])
+            logger.debug("histogram_on_nucleus for nucleus id %d" % _id)
+
+            histogram, edges = m.histogram_of_surface(image, nucl_bnd, bins)
+
+            self._mdf.loc[self._ix, 'hist_edges'] = np.array2string(edges, **_hist_edges_arr_ops)
+            self._mdf.loc[self._ix, '%s_nuc_hist' % tag] = np.array2string(histogram.astype(int), separator=',')
+
+    def _measure_histogram_on_ring(self, image, cfg):
+        assert self._ix.any(), "no rows in the filtered dataframe"
+        assert "ring_pix" in self._mdf[self._ix], "ring detection step needed"
+
+        n_bins = cfg['hist_bins'].iloc[0]
+        min = cfg['hist_min'].iloc[0]
+        max = cfg['hist_max'].iloc[0]
+        tag = cfg['tag'].iloc[0]
+        log_bins = cfg['hist_log'].iloc[0]
+        if log_bins:
+            bins = np.logspace(np.log10(1 if min == 0 else min), np.log10(max), n_bins)
+        else:
+            bins = np.linspace(min, max, n_bins)
+
+        for ix, row in self._mdf[self._ix].iterrows():
+            _id = row["id"]
+            rng_bnd = shapely.wkt.loads(row["ring_pix"])
+            logger.debug("histogram_on_nucleus for nucleus id %d" % _id)
+
+            histogram, edges = m.histogram_of_surface(image, rng_bnd, bins)
+
+            self._mdf.loc[self._ix, 'hist_edges'] = np.array2string(edges, **_hist_edges_arr_ops)
+            self._mdf.loc[self._ix, '%s_rng_hist' % tag] = np.array2string(histogram.astype(int), separator=',')
+
+    def _measure_line_intensity(self, image, cfg):
+        assert self._ix.any(), "no rows in the filtered dataframe"
+        assert "ring_pix" in self._mdf[self._ix], "ring detection step needed"
+
+        width, height = [s for s in image.shape]
+        tag = cfg['tag'].iloc[0]
+        n_lines = cfg['n_lines'].iloc[0]
+        rng_thick = cfg['rng_thickness'].iloc[0]
+        rng_thick *= self.pix_per_um
+        angle_delta = 2 * np.pi / n_lines
+        frame = Polygon([(0, 0), (0, width), (height, width), (height, 0)]).buffer(-rng_thick * self.pix_per_um)
+
+        for ix, row in self._mdf[self._ix].iterrows():
+            _id = row["id"]
+            nucleus = shapely.wkt.loads(row["nuc_pix"])
+            logger.debug("line_intensity for nucleus id %d" % _id)
+
+            minx, miny, maxx, maxy = nucleus.bounds
+            radius = max(maxx - minx, maxy - miny)
+            for k, angle in enumerate([angle_delta * i for i in range(n_lines)]):
+                ray = LineString([nucleus.centroid,
+                                  (nucleus.centroid.x + radius * np.cos(angle),
+                                   nucleus.centroid.y + radius * np.sin(angle))])
+                r_seg = ray.intersection(nucleus)
+                # print(r_seg, ray)
+                if r_seg.is_empty:
+                    continue
+                if type(r_seg) == MultiLineString:
+                    r_seg = r_seg[0]
+                    # print(r_seg)
+                pt = Point(r_seg.coords[-1])
+                if not frame.contains(pt):
+                    continue
+
+                for pt0, pt1 in m.pairwise(nucleus.exterior.coords):
+                    # if pt.touches(LineString([pt0, pt1])):
+                    if Point(pt).distance(LineString([pt0, pt1])) < 1e-6:
+                        # compute normal vector
+                        dx = pt1[0] - pt0[0]
+                        dy = pt1[1] - pt0[1]
+                        # touching point of the polygon line segment
+                        px, py = pt.x, pt.y
+                        # normalize normal vector
+                        mag = np.sqrt(dx ** 2 + dy ** 2)
+                        dx, dy = dx / mag, dy / mag
+
+                        r0, c0, r1, c1 = np.array([px, py, px - dy * rng_thick, py + dx * rng_thick]).astype(int)
+                        lin = LineString([(r0, c0), (r1, c1)])
+                        rr, cc = draw.line(r0, c0, r1, c1)
+
+                        # TODO: Add units support
+                        ix = self._ix & (self._mdf['id'] == _id)
+                        self._mdf.loc[ix, '%s_line_%02d' % (tag, k)] = np.array2string(image[rr, cc], separator=',')
+                        # self._mdf.loc[ix, '%s_line_%02d_sum' % (tag, k)] = m.integral_over_line(image, lin).astype(int)
+                        self._mdf.loc[ix, '%s_int_lines' % tag] = int(n_lines)
+
+                        # lin = r_seg
+                        r0, c0, r1, c1 = np.array(r_seg).flatten().astype(int)
+                        rr, cc = draw.line(r0, c0, r1, c1)
+                        self._mdf.loc[ix, '%s_nuc_line_%02d' % (tag, k)] = np.array2string(image[rr, cc], separator=',')
+                        # self._mdf.loc[ix, '%s_nuc_line_%02d_sum' % (tag, k)] = m.integral_over_line(image, lin).astype(int)

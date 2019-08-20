@@ -4,7 +4,6 @@ import warnings
 import enlighten
 
 from pandas.errors import EmptyDataError
-
 import filters
 
 logger = logging.getLogger('batch')
@@ -18,7 +17,7 @@ warnings.simplefilter(action='ignore', category=FutureWarning)
 
 def collect(path, csv_fname="nuclei.pandas.csv"):
     df = pd.DataFrame()
-    cols = ['nucleus', 'nuc_pix', 'cell', 'cell_pix', 'ring']
+    cols_to_delete = ['nucleus', 'nuc_pix', 'cell', 'cell_pix', 'ring', 'ring_pix']
     manager = enlighten.get_manager()
 
     csv_file = os.path.join(path, csv_fname)
@@ -28,7 +27,6 @@ def collect(path, csv_fname="nuclei.pandas.csv"):
     for root, directories, filenames in os.walk(os.path.join(path, "pandas")):
         bar = manager.counter(total=len(filenames), desc='Progress', unit='files')
         for k, filename in enumerate(filenames):
-            # if k > 10: continue
             ext = filename.split('.')[-1]
             if ext == 'csv':
                 logger.info("adding %s" % filename)
@@ -38,9 +36,10 @@ def collect(path, csv_fname="nuclei.pandas.csv"):
                            .pipe(filters.nucleus, radius_min=4, radius_max=10)
                            .pipe(filters.polsby_popper, column="nucleus")
                            )
-                    csv = csv.drop(columns=[c for c in cols if c in csv])
+                    csv = csv.drop(columns=[c for c in cols_to_delete if c in csv])
                     with open(csv_file, 'a') as f:
                         csv.to_csv(f, mode='a', header=not f.tell())
+
                 except EmptyDataError:
                     logger.warning('found empty csv file: %s' % filename)
                 except ValueError:
