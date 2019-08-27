@@ -13,6 +13,7 @@ logger = logging.getLogger('hhlab')
 logging.getLogger('matplotlib').setLevel(logging.ERROR)
 pd.set_option('display.width', 320)
 pd.set_option('display.max_columns', 20)
+pd.set_option('display.max_rows', 100)
 
 
 def is_valid_measured_row(row):
