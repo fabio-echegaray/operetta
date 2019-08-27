@@ -85,7 +85,8 @@ def lines(df):
     # df.dropna(axis='index', subset=["x", "x_center", "v_width"], inplace=True)
 
     # get rid of signals that are too low (either absolute measurements of peak-peak signal)
-    df.loc[:, "not_quite"] = df["signal"].apply(lambda v: v.max() - v.min() < 200)
+    idx_nparr = df["signal"].apply(lambda v: type(v) == np.ndarray)
+    df.loc[idx_nparr, "not_quite"] = df.loc[idx_nparr, "signal"].apply(lambda v: v.max() - v.min() < 100)
     valid_units_ix = ~df.groupby(["unit"])["not_quite"].apply(np.any)
     valid_units = valid_units_ix[valid_units_ix].index.values
 

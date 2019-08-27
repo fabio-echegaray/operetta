@@ -4,6 +4,7 @@ import ast
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 from matplotlib.ticker import EngFormatter
+import logging
 import numpy as np
 import pandas as pd
 import seaborn as sns
@@ -13,6 +14,9 @@ import scipy.signal
 from plots.utils import histogram_of_every_row, histogram_with_errorbars
 import operetta as o
 import filters
+
+logger = logging.getLogger('ring')
+logger.setLevel(logging.DEBUG)
 
 
 def eval_into_array(df, column_name):
@@ -32,7 +36,7 @@ class Ring():
                 'act_int', 'act_dens',
                 'act_rng_int', 'act_rng_dens',
                 'hist_edges', 'act_nuc_hist', 'act_rng_hist']
-    _cat = ['id', 'row', 'col', 'fid', 'p', 'Cell Type', 'Cell Count', 'Compound', 'Concentration']
+    _cat = ['zid', 'row', 'col', 'fid', 'p', 'Cell Type', 'Cell Count', 'Compound', 'Concentration']
 
     # def __init__(self, cc: o.ConfiguredChannels):
     def __init__(self, cc):
@@ -75,18 +79,19 @@ class Ring():
         if self._lines is not None: return self._lines
 
         a = self.df
-        columns = [c for c in a.columns if c[:-2] == "act_line_"]
+        columns = [c for c in a.columns if c[:9] == "act_line_"]
         for c in columns:
             a = a.pipe(eval_into_array, column_name=c)
         a = pd.melt(a, id_vars=self._cat, value_vars=columns, value_name='signal')
-        a.loc[:, "unit"] = a.apply(lambda r: "%s|%s|%s|%s|%s" % (r['id'], r['row'], r['col'], r['fid'], r['p']), axis=1)
+        a.loc[:, "unit"] = a.apply(lambda r: "%s|%s|%s|%s|%s" % (r['zid'], r['row'], r['col'], r['fid'], r['p']), axis=1)
         # calculate the sum of signal intensities
         a.loc[:, "sum"] = a["signal"].apply(np.sum)
         a.loc[:, "s_max"] = a["signal"].apply(np.max)
         # calculate domains of signals (x's) and center all the curves on the maximum points
         a.loc[:, "xpeak"] = a["signal"].apply(lambda v: np.argmax(v))
 
-        a.loc[:, "x"] = a.loc[~a["signal"].isna(), "signal"].apply(lambda v: np.arange(start=0, stop=len(v), step=1))
+        idx_nparr = a["signal"].apply(lambda v: type(v) == np.ndarray)
+        a.loc[:, "x"] = a.loc[idx_nparr, "signal"].apply(lambda v: np.arange(start=0, stop=len(v), step=1))
         a.loc[:, "x_center"] = a["x"] - a["xpeak"]
 
         # calculate width of peaks
@@ -106,7 +111,25 @@ class Ring():
     @property
     def lines_filtered(self):
         if self._lines_filt is not None: return self._lines_filt
-        self._lines_filt = self.lines.pipe(filters.lines)
+        lflt_path = os.path.join(self.cc.base_path, 'out', 'lines.filtered.csv')
+        if not os.path.exists(lflt_path):
+            self._lines_filt = (self.lines.pipe(filters.lines)
+                                .dropna(axis=0, subset=["zid"])
+                                )
+            txt_safe = self._lines_filt.copy()
+            arr_ops = {"precision": 2, "separator": ",", "suppress_small": True,
+                       "formatter": {"float": lambda x: "%0.2f" % x}}
+            idx = txt_safe["signal"].apply(lambda v: type(v) == np.ndarray)
+            for col in ["x", "x_center", "signal"]:
+                txt_safe.loc[idx, col] = txt_safe.loc[idx, col].apply(lambda v: np.array2string(v, **arr_ops))
+            txt_safe.to_csv(lflt_path, index=False)
+        else:
+            logger.info("Loading filtered lines from file.")
+            self._lines_filt = (pd.read_csv(lflt_path)
+                                .pipe(eval_into_array, column_name="x")
+                                .pipe(eval_into_array, column_name="x_center")
+                                .pipe(eval_into_array, column_name="signal")
+                                )
         return self._lines_filt
 
     @property
@@ -316,15 +339,25 @@ class Ring():
 
     def line_integrals(self):
         for a, kind in zip([self.lines, self.lines_filtered], ["all", "flt"]):
+        # for a, kind in zip([self.lines_filtered], ["flt"]):
+            # optional: filter a subgroup
+            # col_order = ["Arrest", "Cycling"]
+            # col_order = ['Cycling', 'Arrest', 'Release',
+            #              'Cyto2ug-Cyc', 'Cyto2ug-Arr', 'Cyto2ug-Rel',
+            #              'Noc20ng-Cyc', 'Noc20ng-Arr', 'Noc20ng-Rel']
+            col_order = a["Compound"].unique()
+            print(col_order)
+            a = a[a["Compound"].isin(col_order)]
             # get only one row per z-stack
             idx = a.groupby(["unit"])["s_max"].transform(max) == a["s_max"]
             a = a.loc[idx]
 
             fig = plt.figure(figsize=(8, 8), dpi=150)
             ax = fig.gca()
-            sns.boxenplot(x="Compound", y="sum", data=a)
+            sns.boxenplot(x="Compound", y="sum", order=col_order, data=a)
             ax.yaxis.set_major_formatter(self.formatter)
             ax.set_yscale('log')
+            ax.set_xticklabels(ax.xaxis.get_ticklabels(), rotation=45, multialignment='right')
             path = o.ensure_dir(os.path.join(self.cc.base_path, 'out', 'graphs', 'line_boxplot_%s.pdf' % kind))
             fig.savefig(path)
             plt.close()
@@ -344,6 +377,8 @@ class Ring():
 
     def line_measurements(self):
         a = self.lines_filtered
+        # optional: filter a subgroup
+        # a = a[a["Compound"].isin(["Arrest", "Cycling"])]
         # get only one row per z-stack
         idx = a.groupby(["unit"])["s_max"].transform(max) == a["s_max"]
         a = a[idx]
@@ -379,7 +414,7 @@ class Ring():
         for _ax in g.axes[0]:
             _ax.xaxis.set_major_formatter(self.formatter)
             _ax.yaxis.set_major_formatter(self.formatter)
-        path = o.ensure_dir(os.path.join(self.cc.base_path, 'out', 'graphs', 'lines_all.pdf'))
+        path = o.ensure_dir(os.path.join(self.cc.base_path, 'out', 'graphs', 'lines_flt_indiv.pdf'))
         g.savefig(path)
         plt.close()
 

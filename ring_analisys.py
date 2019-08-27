@@ -29,7 +29,7 @@ def select_images(df, operetta_folder, method="copy"):
                                                        '%s@%s' % (r["Cell Type"], r["Cell Count"]), r["Compound"]))
 
         # name, original_path = o.ConfiguredChannels.filename_of_render(r, render_path)
-        name = 'r%d-c%d-f%d-p%s-i%d.jpg' % (r["row"], r["col"], r["fid"], str(r["p"]), r["id"])
+        name = 'r%d-c%d-f%d-p%s-i%d.jpg' % (r["row"], r["col"], r["fid"], str(r["p"]), r["zid"])
         original_path = os.path.join(render_path, name)
         destination_path = o.ensure_dir(os.path.join(destination_folder, name))
 
@@ -61,6 +61,15 @@ if __name__ == '__main__':
     parser.add_argument('folder', metavar='FOLDER', type=str,
                         help='folder where operetta images reside')
     args = parser.parse_args()
+
+    # import sys
+    # from PyQt4 import QtCore, QtGui, uic
+    # app = QtGui.QApplication(sys.argv)
+    # qfd = QtGui.QFileDialog()
+    # path = "/Volumes/Kidbeat/data"
+    # # f = QtGui.QFileDialog.getOpenFileName(qfd, "Select Directory", path, filter)
+    # f = QtGui.QFileDialog.getExistingDirectory(qfd, "Select Directory")
+    # print(f)
 
     operetta = o.ConfiguredChannels(args.folder)
     pl = Ring(operetta)
