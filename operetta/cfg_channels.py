@@ -444,9 +444,13 @@ class ConfiguredChannels(Montage):
         # --------------------
         #     Find nuclei
         # --------------------
+        s = cfg[cfg['z_stack_aggregation'].apply(lambda l: l == 'use each image individually')]
+        zstack_idv = len(s) > 0
         c = cfg[cfg['pipeline'].apply(lambda l: 'nucleus' in l)]
         assert len(c) > 0, 'nuclei finding step needed in configuration'
         assert len(c) < 2, 'only one nuclei finding step per batch allowed'
+        if zstack_idv:
+            c.loc[:, 'z_stack_aggregation'] = 'use each image individually'
         self._stack_operation(row, col, fid, c, self._measure_nuclei)
 
         # --------------------
@@ -504,6 +508,12 @@ class ConfiguredChannels(Montage):
         c = cfg[cfg['pipeline'].apply(lambda l: 'line_intensity_ring' in l)]
         for _, cf in c.iterrows():
             self._stack_operation(row, col, fid, c, self._measure_line_intensity)
+
+        # --------------------
+        #     Re label id column if analizing every image in the z-stack
+        # --------------------
+        if zstack_idv:
+            self._relabel_id()
 
         return self._mdf
 
@@ -869,3 +879,18 @@ class ConfiguredChannels(Montage):
                         rr, cc = draw.line(r0, c0, r1, c1)
                         self._mdf.loc[ix, '%s_nuc_line_%02d' % (tag, k)] = np.array2string(image[rr, cc], separator=',')
                         # self._mdf.loc[ix, '%s_nuc_line_%02d_sum' % (tag, k)] = m.integral_over_line(image, lin).astype(int)
+
+    def _relabel_id(self):
+        assert self._ix.any(), "no rows in the filtered dataframe"
+
+        def _fn(df):
+            z = df["p"].unique()
+            for k, (_ix, nuc) in enumerate(df.loc[df["p"] == min(z), "nuc_pix"].iteritems()):  # for every nuclei
+                nucleus = shapely.wkt.loads(nuc).buffer(2 * self.pix_per_um)
+                in_nuc_ix = df["nuc_pix"].apply(lambda v: nucleus.contains(shapely.wkt.loads(v)))
+                df.loc[in_nuc_ix, "zid"] = k
+
+            return df
+
+        group = ["row", "col", "fid"]
+        self._mdf = self._mdf.groupby(group).apply(_fn).reset_index(drop=True)

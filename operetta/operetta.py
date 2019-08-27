@@ -60,10 +60,11 @@ class Montage:
         self._layout = None
         self.flatfield_profiles = None
 
-        if generate_structure and os.path.exists(self.images_path):
-            self._generate_sample_image()
-        else:
-            raise ImagesFolderNotFound('Images folder is not in the structure.')
+        if generate_structure:
+            if os.path.exists(self.images_path):
+                self._generate_sample_image()
+            else:
+                raise ImagesFolderNotFound('Images folder is not in the structure.')
 
     @staticmethod
     def filename(row):
