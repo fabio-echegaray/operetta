@@ -11,10 +11,13 @@ from shapely.wkt import dumps
 from shapely.geometry import LineString, MultiLineString, Polygon
 from skimage import draw
 
-logger = logging.getLogger('gui.ring')
+logger = logging.getLogger('gui.ring.label')
+_colors = ["#e5d429", "#a0c334", "#fa5477", "#b5525c", "#000272"]
 
 
 class RingImageQLabel(QtGui.QLabel):
+    clicked = Qt.pyqtSignal()
+
     def __init__(self, parent, file=None):
         QtGui.QLabel.__init__(self, parent)
         self.selected = True
@@ -34,15 +37,30 @@ class RingImageQLabel(QtGui.QLabel):
         self.n_channels = None
         self.n_zstack = None
         self._zstack = 0
-        self._channel = 0
+
+        self._dnach = 0
+        self._actch = 0
+        self._active_ch = "dna"
 
         self._image = None
+        self._dnaimage = None
+        self._actimage = None
         self._boudaries = None
 
         self.sel_nuc = None
-        self.measurement = None
+        self.measurements = None
 
         self.clear()
+
+    @property
+    def active_ch(self):
+        return self._active_ch
+
+    @active_ch.setter
+    def active_ch(self, value):
+        if value is not None:
+            self._active_ch = value
+            self._repaint()
 
     @property
     def zstack(self):
@@ -52,17 +70,47 @@ class RingImageQLabel(QtGui.QLabel):
     def zstack(self, value):
         if value is not None:
             self._zstack = int(value)
+            self._dnaimage = retrieve_image(self.images, channel=self._dnach, number_of_channels=self.n_channels,
+                                            zstack=self.zstack, number_of_zstacks=self.n_zstack, frame=0)
+            self._actimage = retrieve_image(self.images, channel=self._actch, number_of_channels=self.n_channels,
+                                            zstack=self.zstack, number_of_zstacks=self.n_zstack, frame=0)
+            self._boudaries = None
+            p = self.sel_nuc.centroid
+            self._measure(p.x, p.y)
             self._repaint()
 
     @property
-    def channel(self):
-        return self._channel
+    def dna_channel(self):
+        return self._dnach
 
-    @channel.setter
-    def channel(self, value):
+    @dna_channel.setter
+    def dna_channel(self, value):
         if value is not None:
-            self._channel = int(value)
-            self._repaint()
+            self._dnach = int(value)
+
+            if self.file is not None:
+                self._dnaimage = retrieve_image(self.images, channel=self._dnach, number_of_channels=self.n_channels,
+                                                zstack=self.zstack, number_of_zstacks=self.n_zstack, frame=0)
+                self._boudaries = None
+                p = self.sel_nuc.centroid
+                self._measure(p.x, p.y)
+                if self.active_ch == "dna":
+                    self._repaint()
+
+    @property
+    def act_channel(self):
+        return self._actch
+
+    @act_channel.setter
+    def act_channel(self, value):
+        if value is not None:
+            self._actch = int(value)
+
+            if self.file is not None:
+                self._actimage = retrieve_image(self.images, channel=self._actch, number_of_channels=self.n_channels,
+                                                zstack=self.zstack, number_of_zstacks=self.n_zstack, frame=0)
+                if self.active_ch == "act":
+                    self._repaint()
 
     @property
     def file(self):
@@ -89,19 +137,10 @@ class RingImageQLabel(QtGui.QLabel):
         self.dataHasChanged = True
         self.repaint()
 
-    def mouseReleaseEvent(self, ev):
-        pos = ev.pos()
-        # convert to image pixel coords
-        x = pos.x() * self.dwidth / self.width()
-        y = pos.y() * self.dheight / self.height()
-        logger.info('clicked! X%d Y%d' % (x, y))
-        self.emit(QtCore.SIGNAL('clicked()'))
-
-        self.sel_nuc = None
-
-        if self._image is not None:
-            logger.debug("computing boundaries")
-            lbl, self._boudaries = m.nuclei_segmentation(self._image)
+    def _measure(self, x, y):
+        if self._dnaimage is not None and self._boudaries is None:
+            logger.debug("computing nuclei boundaries")
+            lbl, self._boudaries = m.nuclei_segmentation(self._dnaimage)
 
         if self._boudaries is not None:
             pt = Point(x, y)
@@ -110,20 +149,35 @@ class RingImageQLabel(QtGui.QLabel):
                 if nucleus["boundary"].contains(pt):
                     self.sel_nuc = nucleus["boundary"]
 
-            lines = m.measure_lines_around_polygon(self._image, self.sel_nuc, pix_per_um=self.pix_per_um)
-            self.measurement = list()
+            rngtck = 3 * self.pix_per_um
+            pol = self.sel_nuc.buffer(-rngtck / 2)
+            lines = m.measure_lines_around_polygon(self._actimage, pol, pix_per_um=self.pix_per_um)
+            self.measurements = list()
             for k, (ls, l) in enumerate(lines):
                 # print(np.array2string(l, separator=','))
-                self.measurement.append({'n': k, 'x': x, 'y': y, 'l': l,
-                                         'ls0': ls.coords[0], 'ls1': ls.coords[1],
-                                         'd': max(l) - min(l), 'sum': np.sum(l)})
+                self.measurements.append({'n': k, 'x': x, 'y': y, 'l': l, 'c': _colors[k],
+                                          'ls0': ls.coords[0], 'ls1': ls.coords[1],
+                                          'd': max(l) - min(l), 'sum': np.sum(l)})
 
-            self._repaint()
+    def mouseReleaseEvent(self, ev):
+        pos = ev.pos()
+        # convert to image pixel coords
+        x = pos.x() * self.dwidth / self.width()
+        y = pos.y() * self.dheight / self.height()
+        logger.info('clicked! X%d Y%d' % (x, y))
+
+        self.sel_nuc = None
+        self._measure(x, y)
+
+        # self.emit(QtCore.SIGNAL('clicked()'))
+        self.clicked.emit()
+        self._repaint()
 
     def paintEvent(self, event):
         if self.dataHasChanged:
             self.dataHasChanged = False
-            data = retrieve_image(self.images, channel=self.channel, number_of_channels=self.n_channels,
+            ch = self.act_channel if self.active_ch == "act" else self.dna_channel
+            data = retrieve_image(self.images, channel=ch, number_of_channels=self.n_channels,
                                   zstack=self.zstack, number_of_zstacks=self.n_zstack, frame=0)
 
             self.dwidth, self.dheight = data.shape
@@ -145,27 +199,43 @@ class RingImageQLabel(QtGui.QLabel):
         painter.begin(self.image_pixmap)
         painter.setRenderHint(QPainter.Antialiasing)
 
-        # get nuclei boundary as a polygon
         rng_thick = 3
         rng_thick *= self.pix_per_um
-        nucb_qpoints_e = [Qt.QPoint(x, y) for x, y in self.sel_nuc.buffer(rng_thick).exterior.coords]
-        nucb_qpoints_i = [Qt.QPoint(x, y) for x, y in self.sel_nuc.exterior.coords]
 
-        painter.setPen(QPen(QBrush(QColor('white')), 3))
-        painter.drawPolygon(Qt.QPolygon(nucb_qpoints_i))
-        painter.drawPolygon(Qt.QPolygon(nucb_qpoints_e))
+        if self.active_ch == "dna":
+            # get nuclei boundary as a polygon
+            nucb_qpoints_e = [Qt.QPoint(x, y) for x, y in self.sel_nuc.buffer(rng_thick).exterior.coords]
+            nucb_qpoints_i = [Qt.QPoint(x, y) for x, y in self.sel_nuc.exterior.coords]
 
-        nucb_poly = Qt.QPolygon(nucb_qpoints_e).subtracted(Qt.QPolygon(nucb_qpoints_i))
-        brush = QBrush(QtCore.Qt.BDiagPattern)
-        brush.setColor(QColor('white'))
-        painter.setBrush(brush)
-        painter.setPen(QPen(QBrush(QColor('transparent')), 0))
+            painter.setPen(QPen(QBrush(QColor('white')), 3))
+            painter.drawPolygon(Qt.QPolygon(nucb_qpoints_i))
+            painter.drawPolygon(Qt.QPolygon(nucb_qpoints_e))
 
-        painter.drawPolygon(nucb_poly)
+            nucb_poly = Qt.QPolygon(nucb_qpoints_e).subtracted(Qt.QPolygon(nucb_qpoints_i))
+            brush = QBrush(QtCore.Qt.BDiagPattern)
+            brush.setColor(QColor('white'))
+            painter.setBrush(brush)
+            painter.setPen(QPen(QBrush(QColor('transparent')), 0))
 
-        painter.setPen(QPen(QBrush(QColor('blue')), 5))
-        for me in self.measurement:
-            pts = [Qt.QPoint(x, y) for x, y in [me['ls0'], me['ls1']]]
-            painter.drawLine(pts[0], pts[1])
+            painter.drawPolygon(nucb_poly)
+
+            for me in self.measurements:
+                painter.setPen(QPen(QBrush(QColor(me['c'])), 5))
+                pts = [Qt.QPoint(x, y) for x, y in [me['ls0'], me['ls1']]]
+                painter.drawLine(pts[0], pts[1])
+
+        elif self.active_ch == "act":
+            nuc_pen = QPen(QBrush(QColor('red')), 2)
+            nuc_pen.setStyle(QtCore.Qt.DotLine)
+            painter.setPen(nuc_pen)
+            for n in [e["boundary"] for e in self._boudaries]:
+                # get nuclei boundary as a polygon
+                nucb_qpoints = [Qt.QPoint(x, y) for x, y in n.exterior.coords]
+                painter.drawPolygon(Qt.QPolygon(nucb_qpoints))
+
+            for me in self.measurements:
+                painter.setPen(QPen(QBrush(QColor(me['c'])), 5))
+                pts = [Qt.QPoint(x, y) for x, y in [me['ls0'], me['ls1']]]
+                painter.drawLine(pts[0], pts[1])
 
         painter.end()

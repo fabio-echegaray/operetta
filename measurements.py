@@ -333,7 +333,7 @@ def measure_lines_around_polygon(image, polygon, pix_per_um=1, n_lines=3, rng_th
                 mag = np.sqrt(dx ** 2 + dy ** 2)
                 dx, dy = dx / mag, dy / mag
 
-                r0, c0, r1, c1 = np.array([px, py, px + dy * rng_thick, py - dx * rng_thick]).astype(int)
+                r0, c0, r1, c1 = np.array([px, py, px - dy * rng_thick, py + dx * rng_thick]).astype(int)
                 rr, cc = draw.line(r0, c0, r1, c1)
                 lin = LineString([(r0, c0), (r1, c1)])
 
