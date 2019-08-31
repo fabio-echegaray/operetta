@@ -1,5 +1,6 @@
 import logging
 
+import pandas as pd
 from PIL.ImageQt import ImageQt
 from PyQt4 import QtCore, QtGui, uic
 from PyQt4.QtGui import QMainWindow, QPixmap, QWidget
@@ -15,6 +16,10 @@ logger = logging.getLogger('ring-gui')
 sp = SubplotParams(left=0., bottom=0., right=1., top=1.)
 mydpi = 72
 
+pd.set_option('display.width', 320)
+pd.set_option('display.max_columns', 20)
+pd.set_option('display.max_rows', 100)
+
 
 class RingWindow(QMainWindow):
     image: RingImageQLabel
@@ -24,11 +29,18 @@ class RingWindow(QMainWindow):
         uic.loadUi('./gui_ring.ui', self)
         self.zSpin.valueChanged.connect(self.on_zvalue_change)
         self.openButton.pressed.connect(self.on_open_button)
+        self.addButton.pressed.connect(self.on_add_button)
         self.dnaSpin.valueChanged.connect(self.on_dnaval_change)
         self.actSpin.valueChanged.connect(self.on_actval_change)
 
+        self.df = pd.DataFrame()
+
         # fig = Figure((self.image.width() / mydpi, self.image.height() / mydpi), subplotpars=sp, dpi=mydpi)
         self.file = "/Users/Fabio/data/lab/airyscan/nil.czi"
+
+    def closeEvent(self, event):
+        if not self.df.empty:
+            self.df.to_csv("out.csv")
 
     @QtCore.pyqtSlot()
     def on_open_button(self):
@@ -66,6 +78,13 @@ class RingWindow(QMainWindow):
         logger.info('on_actval_change')
         # self.image.zstack = self.zSpin.value()
 
+    @QtCore.pyqtSlot()
+    def on_add_button(self):
+        logger.info('on_add_button')
+        if self.image.measurement is not None:
+            self.df = self.df.append(self.image.measurement, ignore_index=True, sort=False)
+            print(self.df)
+
 
 if __name__ == '__main__':
     import sys
@@ -87,9 +106,3 @@ if __name__ == '__main__':
     gui.show()
 
     sys.exit(app.exec_())
-
-    # qfd = QtGui.QFileDialog()
-    # path = "/Volumes/Kidbeat/data"
-    # # f = QtGui.QFileDialog.getOpenFileName(qfd, "Select Directory", path, filter)
-    # f = QtGui.QFileDialog.getExistingDirectory(qfd, "Select Directory")
-    # print(f)

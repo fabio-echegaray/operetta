@@ -16,6 +16,10 @@ import skimage.segmentation as segmentation
 import skimage.transform as tf
 from shapely.geometry import Polygon, LineString
 from scipy.ndimage.morphology import distance_transform_edt
+from shapely.geometry.point import Point
+from shapely import affinity
+from shapely.wkt import dumps
+from shapely.geometry import LineString, MultiLineString, Polygon
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger('hhlab')
@@ -292,3 +296,45 @@ def is_valid_sample(frame_polygon, cell_polygon, nuclei_polygon, nuclei_list=Non
     logger.debug('sample accepted with an area ratio of %0.2f' % area_ratio)
 
     return True, None
+
+
+def measure_lines_around_polygon(image, polygon, pix_per_um=1, n_lines=3, rng_thick=3):
+    width, height = image.shape
+    rng_thick *= pix_per_um
+    angle_delta = 2 * np.pi / n_lines
+    frame = Polygon([(0, 0), (0, width), (height, width), (height, 0)]).buffer(-rng_thick)
+
+    minx, miny, maxx, maxy = polygon.bounds
+    radius = max(maxx - minx, maxy - miny)
+    for k, angle in enumerate([angle_delta * i for i in range(n_lines)]):
+        ray = LineString([polygon.centroid,
+                          (polygon.centroid.x + radius * np.cos(angle),
+                           polygon.centroid.y + radius * np.sin(angle))])
+        r_seg = ray.intersection(polygon)
+
+        if r_seg.is_empty:
+            continue
+        if type(r_seg) == MultiLineString:
+            r_seg = r_seg[0]
+
+        pt = Point(r_seg.coords[-1])
+        if not frame.contains(pt):
+            continue
+
+        for pt0, pt1 in pairwise(polygon.exterior.coords):
+            # if pt.touches(LineString([pt0, pt1])):
+            if Point(pt).distance(LineString([pt0, pt1])) < 1e-6:
+                # compute normal vector
+                dx = pt1[0] - pt0[0]
+                dy = pt1[1] - pt0[1]
+                # touching point of the polygon line segment
+                px, py = pt.x, pt.y
+                # normalize normal vector
+                mag = np.sqrt(dx ** 2 + dy ** 2)
+                dx, dy = dx / mag, dy / mag
+
+                r0, c0, r1, c1 = np.array([px, py, px + dy * rng_thick, py - dx * rng_thick]).astype(int)
+                rr, cc = draw.line(r0, c0, r1, c1)
+                lin = LineString([(r0, c0), (r1, c1)])
+
+                yield lin, image[rr, cc]
