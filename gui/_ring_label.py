@@ -42,7 +42,6 @@ class RingImageQLabel(QtGui.QLabel):
         self._actch = 0
         self._active_ch = "dna"
 
-        self._image = None
         self._dnaimage = None
         self._actimage = None
         self._boudaries = None
@@ -70,13 +69,15 @@ class RingImageQLabel(QtGui.QLabel):
     def zstack(self, value):
         if value is not None:
             self._zstack = int(value)
-            self._dnaimage = retrieve_image(self.images, channel=self._dnach, number_of_channels=self.n_channels,
-                                            zstack=self.zstack, number_of_zstacks=self.n_zstack, frame=0)
-            self._actimage = retrieve_image(self.images, channel=self._actch, number_of_channels=self.n_channels,
-                                            zstack=self.zstack, number_of_zstacks=self.n_zstack, frame=0)
             self._boudaries = None
-            p = self.sel_nuc.centroid
-            self._measure(p.x, p.y)
+            if self.images is not None:
+                self._dnaimage = retrieve_image(self.images, channel=self._dnach, number_of_channels=self.n_channels,
+                                                zstack=self.zstack, number_of_zstacks=self.n_zstack, frame=0)
+                self._actimage = retrieve_image(self.images, channel=self._actch, number_of_channels=self.n_channels,
+                                                zstack=self.zstack, number_of_zstacks=self.n_zstack, frame=0)
+            if self.sel_nuc is not None:
+                p = self.sel_nuc.centroid
+                self._measure(p.x, p.y)
             self._repaint()
 
     @property
@@ -154,7 +155,6 @@ class RingImageQLabel(QtGui.QLabel):
             lines = m.measure_lines_around_polygon(self._actimage, pol, pix_per_um=self.pix_per_um)
             self.measurements = list()
             for k, (ls, l) in enumerate(lines):
-                # print(np.array2string(l, separator=','))
                 self.measurements.append({'n': k, 'x': x, 'y': y, 'l': l, 'c': _colors[k],
                                           'ls0': ls.coords[0], 'ls1': ls.coords[1],
                                           'd': max(l) - min(l), 'sum': np.sum(l)})
@@ -173,15 +173,34 @@ class RingImageQLabel(QtGui.QLabel):
         self.clicked.emit()
         self._repaint()
 
+    def paintMeasure(self):
+        logger.debug("painting measurement")
+        data = retrieve_image(self.images, channel=self._actch, number_of_channels=self.n_channels,
+                              zstack=self.zstack, number_of_zstacks=self.n_zstack, frame=0)
+        self.dwidth, self.dheight = data.shape
+        print(data.shape, self.dwidth, self.dheight)
+
+        # map the data range to 0 - 255
+        img_8bit = ((data - data.min()) / (data.ptp() / 255.0)).astype(np.uint8)
+
+        for me in self.measurements:
+            r0, c0, r1, c1 = np.array(list(me['ls0']) + list(me['ls1'])).astype(int)
+            rr, cc = draw.line(r0, c0, r1, c1)
+            img_8bit[cc, rr] = 255
+
+        qtimage = QtGui.QImage(img_8bit.repeat(4), self.dwidth, self.dheight, QtGui.QImage.Format_RGB32)
+        self.image_pixmap = QPixmap(qtimage)
+        # self.draw_measurements()
+        self.setPixmap(self.image_pixmap)
+        return
+
     def paintEvent(self, event):
         if self.dataHasChanged:
             self.dataHasChanged = False
             ch = self.act_channel if self.active_ch == "act" else self.dna_channel
             data = retrieve_image(self.images, channel=ch, number_of_channels=self.n_channels,
                                   zstack=self.zstack, number_of_zstacks=self.n_zstack, frame=0)
-
             self.dwidth, self.dheight = data.shape
-            self._image = data
 
             # map the data range to 0 - 255
             img_8bit = ((data - data.min()) / (data.ptp() / 255.0)).astype(np.uint8)

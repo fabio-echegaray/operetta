@@ -337,4 +337,4 @@ def measure_lines_around_polygon(image, polygon, pix_per_um=1, n_lines=3, rng_th
                 rr, cc = draw.line(r0, c0, r1, c1)
                 lin = LineString([(r0, c0), (r1, c1)])
 
-                yield lin, image[rr, cc]
+                yield lin, image[cc, rr]

@@ -6,6 +6,7 @@ from PyQt4 import QtCore, QtGui, uic
 from PyQt4.QtGui import QMainWindow, QWidget
 from matplotlib.figure import SubplotParams
 import matplotlib.ticker as ticker
+from matplotlib.ticker import EngFormatter
 
 from gui._ring_label import RingImageQLabel
 from gui.gui_mplwidget import MplWidget
@@ -27,10 +28,7 @@ class GraphWidget(QWidget):
         super(GraphWidget, self).__init__()
         uic.loadUi('./gui_ring_graph.ui', self)
         self.graphWidget.clear()
-        self.ax.xaxis.set_major_locator(ticker.MultipleLocator(10))
-        self.ax.xaxis.set_minor_locator(ticker.MultipleLocator(5))
-        self.ax.yaxis.set_major_locator(ticker.MultipleLocator(50))
-        self.ax.yaxis.set_minor_locator(ticker.MultipleLocator(25))
+        self.format_ax()
 
     @property
     def canvas(self):
@@ -39,6 +37,14 @@ class GraphWidget(QWidget):
     @property
     def ax(self):
         return self.canvas.ax
+
+    def format_ax(self):
+        self.ax.xaxis.set_major_locator(ticker.MultipleLocator(10))
+        self.ax.xaxis.set_minor_locator(ticker.MultipleLocator(5))
+        self.ax.yaxis.set_major_locator(ticker.MultipleLocator(1e4))
+        self.ax.yaxis.set_minor_locator(ticker.MultipleLocator(5e3))
+        self.ax.yaxis.set_major_formatter(EngFormatter(unit=''))
+        self.ax.set_ylim((0, 3e4))
 
 
 class RingWindow(QMainWindow):
@@ -52,6 +58,7 @@ class RingWindow(QMainWindow):
         self.zSpin.valueChanged.connect(self.on_zvalue_change)
         self.openButton.pressed.connect(self.on_open_button)
         self.addButton.pressed.connect(self.on_add_button)
+        self.measureButton.pressed.connect(self.on_me_button)
         self.dnaSpin.valueChanged.connect(self.on_dnaval_change)
         self.actSpin.valueChanged.connect(self.on_actval_change)
         self.dnaChk.toggled.connect(self.on_img_toggle)
@@ -79,8 +86,23 @@ class RingWindow(QMainWindow):
     def closeEvent(self, event):
         if not self.df.empty:
             self.df.loc[:, "condition"] = self.experimentLineEdit.text()
+            self.df.loc[:, "l"] = self.df.loc[:, "l"].apply(lambda v: np.array2string(v, separator=','))
             self.df.to_csv("out.csv")
         self.grph.close()
+
+    def showEvent(self, event):
+        self.setFocus()
+
+    def keyPressEvent(self, event):
+        key = event.key()
+        print(key)
+
+        if key == QtCore.Qt.Key_A:
+            print('a pressed')
+            # self.image.clear()
+            self.image.paintMeasure()
+        elif key == QtCore.Qt.Key_Left:
+            print('Left Arrow Pressed')
 
     def _graph(self):
         if self.image.measurements is not None:
@@ -88,6 +110,7 @@ class RingWindow(QMainWindow):
             for me in self.image.measurements:
                 x = np.arange(start=0, stop=len(me['l']), step=1)
                 self.grph.ax.plot(x, me['l'], linewidth=0.5, linestyle='-', color=me['c'])
+                self.grph.format_ax()
             self.statusbar.showMessage("ptp: %s" % ["%d " % me['d'] for me in self.image.measurements])
             self.grph.canvas.draw()
 
@@ -104,6 +127,8 @@ class RingWindow(QMainWindow):
         logger.info('on_open_button')
         qfd = QtGui.QFileDialog()
         path = os.path.dirname(self.file)
+        if self.image.file is not None:
+            self.statusbar.showMessage("current file: %s" % os.path.basename(self.image.file))
         flt = "zeiss(*.czi)"
         f = QtGui.QFileDialog.getOpenFileName(qfd, "Open File", path, flt)
         if len(f) > 0:
@@ -118,6 +143,11 @@ class RingWindow(QMainWindow):
     def on_img_click(self):
         logger.info('on_img_click')
         self._graph()
+
+    @QtCore.pyqtSlot()
+    def on_me_button(self):
+        logger.info('on_me_button')
+        self.image.paintMeasure()
 
     @QtCore.pyqtSlot()
     def on_zvalue_change(self):
@@ -150,6 +180,7 @@ class RingWindow(QMainWindow):
         if self.image.measurements is not None:
             new = pd.DataFrame(self.image.measurements)
             new.loc[:, "m"] = self.measure_n
+            new.loc[:, "file"] = os.path.basename(self.image.file)
             self.df = self.df.append(new, ignore_index=True, sort=False)
             self.measure_n += 1
             print(self.df)
