@@ -138,7 +138,7 @@ def generate_mask_from(polygon: Polygon, shape=None):
     return image
 
 
-def nuclei_segmentation(image, compute_distance=False, radius=10):
+def nuclei_segmentation(image, compute_distance=False, radius=10, simp_px=None):
     # apply threshold
     logger.debug('thresholding images')
     thresh_val = filters.threshold_otsu(image)
@@ -174,9 +174,12 @@ def nuclei_segmentation(image, compute_distance=False, radius=10):
     for k, contr in enumerate(contours):
         contr = tform(contr)
         contr[:, 0] *= -1
+        pol = Polygon(contr)
+        if simp_px is not None:
+            pol = pol.simplify(simp_px, preserve_topology=True)
         _list.append({
             'id': k,
-            'boundary': Polygon(contr)
+            'boundary': pol
         })
 
     return labels, _list

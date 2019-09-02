@@ -93,10 +93,11 @@ class RingImageQLabel(QtGui.QLabel):
                 self._dnaimage = retrieve_image(self.images, channel=self._dnach, number_of_channels=self.n_channels,
                                                 zstack=self.zstack, number_of_zstacks=self.n_zstack, frame=0)
                 self._boudaries = None
-                p = self.sel_nuc.centroid
-                self._measure(p.x, p.y)
-                if self.active_ch == "dna":
-                    self._repaint()
+                if self.sel_nuc is not None:
+                    p = self.sel_nuc.centroid
+                    self._measure(p.x, p.y)
+                    if self.active_ch == "dna":
+                        self._repaint()
 
     @property
     def act_channel(self):
@@ -141,7 +142,7 @@ class RingImageQLabel(QtGui.QLabel):
     def _measure(self, x, y):
         if self._dnaimage is not None and self._boudaries is None:
             logger.debug("computing nuclei boundaries")
-            lbl, self._boudaries = m.nuclei_segmentation(self._dnaimage)
+            lbl, self._boudaries = m.nuclei_segmentation(self._dnaimage, simp_px=self.pix_per_um / 4)
 
         if self._boudaries is not None:
             pt = Point(x, y)
@@ -150,6 +151,7 @@ class RingImageQLabel(QtGui.QLabel):
                 if nucleus["boundary"].contains(pt):
                     self.sel_nuc = nucleus["boundary"]
 
+            if self.sel_nuc is None: return
             rngtck = 3 * self.pix_per_um
             pol = self.sel_nuc.buffer(-rngtck / 2)
             lines = m.measure_lines_around_polygon(self._actimage, pol, pix_per_um=self.pix_per_um)
