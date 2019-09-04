@@ -1,6 +1,8 @@
 import logging
+import itertools
 
 import numpy as np
+import seaborn as sns
 from PyQt4 import Qt, QtCore, QtGui
 from PyQt4.QtGui import QBrush, QColor, QPainter, QPen, QPixmap
 from gui._image_loading import find_image, retrieve_image
@@ -12,7 +14,8 @@ from shapely.geometry import LineString, MultiLineString, Polygon
 from skimage import draw
 
 logger = logging.getLogger('gui.ring.label')
-_colors = ["#e5d429", "#a0c334", "#fa5477", "#b5525c", "#000272"]
+_nlin = 20
+_colors = sns.husl_palette(_nlin, h=.5).as_hex()
 
 
 class RingImageQLabel(QtGui.QLabel):
@@ -46,6 +49,7 @@ class RingImageQLabel(QtGui.QLabel):
         self._actimage = None
         self._boudaries = None
 
+        self._render = True
         self.sel_nuc = None
         self.measurements = None
 
@@ -59,6 +63,16 @@ class RingImageQLabel(QtGui.QLabel):
     def active_ch(self, value):
         if value is not None:
             self._active_ch = value
+            self._repaint()
+
+    @property
+    def render(self):
+        return self._render
+
+    @render.setter
+    def render(self, value):
+        if value is not None:
+            self._render = value
             self._repaint()
 
     @property
@@ -152,12 +166,12 @@ class RingImageQLabel(QtGui.QLabel):
                     self.sel_nuc = nucleus["boundary"]
 
             if self.sel_nuc is None: return
-            rngtck = 3 * self.pix_per_um
-            pol = self.sel_nuc.buffer(-rngtck / 2)
-            lines = m.measure_lines_around_polygon(self._actimage, pol, pix_per_um=self.pix_per_um)
+            rngtck = 4 * self.pix_per_um
+            pol = self.sel_nuc.buffer(-rngtck / 3)
+            lines = m.measure_lines_around_polygon(self._actimage, pol, n_lines=_nlin, pix_per_um=self.pix_per_um)
             self.measurements = list()
-            for k, (ls, l) in enumerate(lines):
-                self.measurements.append({'n': k, 'x': x, 'y': y, 'l': l, 'c': _colors[k],
+            for k, ((ls, l), colr) in enumerate(zip(lines, itertools.cycle(_colors))):
+                self.measurements.append({'n': k, 'x': x, 'y': y, 'l': l, 'c': colr,
                                           'ls0': ls.coords[0], 'ls1': ls.coords[1],
                                           'd': max(l) - min(l), 'sum': np.sum(l)})
 
@@ -192,7 +206,6 @@ class RingImageQLabel(QtGui.QLabel):
 
         qtimage = QtGui.QImage(img_8bit.repeat(4), self.dwidth, self.dheight, QtGui.QImage.Format_RGB32)
         self.image_pixmap = QPixmap(qtimage)
-        # self.draw_measurements()
         self.setPixmap(self.image_pixmap)
         return
 
@@ -208,7 +221,8 @@ class RingImageQLabel(QtGui.QLabel):
             img_8bit = ((data - data.min()) / (data.ptp() / 255.0)).astype(np.uint8)
             qtimage = QtGui.QImage(img_8bit.repeat(4), self.dwidth, self.dheight, QtGui.QImage.Format_RGB32)
             self.image_pixmap = QPixmap(qtimage)
-            self.draw_measurements()
+            if self.render:
+                self.draw_measurements()
             self.setPixmap(self.image_pixmap)
 
         return QtGui.QLabel.paintEvent(self, event)

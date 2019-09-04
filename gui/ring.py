@@ -64,6 +64,7 @@ class RingWindow(QMainWindow):
         self.dnaChk.toggled.connect(self.on_img_toggle)
         self.actChk.toggled.connect(self.on_img_toggle)
         self.image.clicked.connect(self.on_img_click)
+        self.renderChk.stateChanged.connect(self.on_render_chk)
 
         self.image.dna_channel = self.dnaSpin.value()
         self.image.act_channel = self.actSpin.value()
@@ -123,6 +124,11 @@ class RingWindow(QMainWindow):
             self.image.active_ch = "act"
 
     @QtCore.pyqtSlot()
+    def on_render_chk(self):
+        logger.info('on_render_chk')
+        self.image.render = self.renderChk.isChecked()
+
+    @QtCore.pyqtSlot()
     def on_open_button(self):
         logger.info('on_open_button')
         qfd = QtGui.QFileDialog()
@@ -180,6 +186,7 @@ class RingWindow(QMainWindow):
         if self.image.measurements is not None:
             new = pd.DataFrame(self.image.measurements)
             new.loc[:, "m"] = self.measure_n
+            new.loc[:, "z"] = self.image.zstack
             new.loc[:, "file"] = os.path.basename(self.image.file)
             self.df = self.df.append(new, ignore_index=True, sort=False)
             self.measure_n += 1
