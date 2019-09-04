@@ -166,9 +166,8 @@ class RingImageQLabel(QtGui.QLabel):
                     self.sel_nuc = nucleus["boundary"]
 
             if self.sel_nuc is None: return
-            rngtck = 4 * self.pix_per_um
-            pol = self.sel_nuc.buffer(-rngtck / 3)
-            lines = m.measure_lines_around_polygon(self._actimage, pol, n_lines=_nlin, pix_per_um=self.pix_per_um)
+            lines = m.measure_lines_around_polygon(self._actimage, self.sel_nuc, rng_thick=4, dl=0.05,
+                                                   n_lines=_nlin, pix_per_um=self.pix_per_um)
             self.measurements = list()
             for k, ((ls, l), colr) in enumerate(zip(lines, itertools.cycle(_colors))):
                 self.measurements.append({'n': k, 'x': x, 'y': y, 'l': l, 'c': colr,
@@ -189,7 +188,7 @@ class RingImageQLabel(QtGui.QLabel):
         self.clicked.emit()
         self._repaint()
 
-    def paintMeasure(self):
+    def paint_measures(self):
         logger.debug("painting measurement")
         data = retrieve_image(self.images, channel=self._actch, number_of_channels=self.n_channels,
                               zstack=self.zstack, number_of_zstacks=self.n_zstack, frame=0)
@@ -202,6 +201,8 @@ class RingImageQLabel(QtGui.QLabel):
         for me in self.measurements:
             r0, c0, r1, c1 = np.array(list(me['ls0']) + list(me['ls1'])).astype(int)
             rr, cc = draw.line(r0, c0, r1, c1)
+            img_8bit[cc, rr] = 255
+            rr, cc = draw.circle(r0, c0, 3)
             img_8bit[cc, rr] = 255
 
         qtimage = QtGui.QImage(img_8bit.repeat(4), self.dwidth, self.dheight, QtGui.QImage.Format_RGB32)

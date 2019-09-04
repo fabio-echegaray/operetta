@@ -101,7 +101,7 @@ class RingWindow(QMainWindow):
         if key == QtCore.Qt.Key_A:
             print('a pressed')
             # self.image.clear()
-            self.image.paintMeasure()
+            self.image.paint_measures()
         elif key == QtCore.Qt.Key_Left:
             print('Left Arrow Pressed')
 
@@ -153,7 +153,7 @@ class RingWindow(QMainWindow):
     @QtCore.pyqtSlot()
     def on_me_button(self):
         logger.info('on_me_button')
-        self.image.paintMeasure()
+        self.image.paint_measures()
 
     @QtCore.pyqtSlot()
     def on_zvalue_change(self):

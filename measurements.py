@@ -301,9 +301,11 @@ def is_valid_sample(frame_polygon, cell_polygon, nuclei_polygon, nuclei_list=Non
     return True, None
 
 
-def measure_lines_around_polygon(image, polygon, pix_per_um=1, n_lines=3, rng_thick=3):
+def measure_lines_around_polygon(image, polygon, pix_per_um=1, n_lines=3, rng_thick=3, dl=None):
     width, height = image.shape
     rng_thick *= pix_per_um
+    if dl is not None:
+        dl *= pix_per_um
     angle_delta = 2 * np.pi / n_lines
     frame = Polygon([(0, 0), (0, width), (height, width), (height, 0)]).buffer(-rng_thick)
 
@@ -333,11 +335,28 @@ def measure_lines_around_polygon(image, polygon, pix_per_um=1, n_lines=3, rng_th
                 # touching point of the polygon line segment
                 px, py = pt.x, pt.y
                 # normalize normal vector
-                mag = np.sqrt(dx ** 2 + dy ** 2)
-                dx, dy = dx / mag, dy / mag
+                alpha = np.arctan2(dy, dx)
+                dx, dy = np.cos(alpha), np.sin(alpha)
 
-                r0, c0, r1, c1 = np.array([px, py, px - dy * rng_thick, py + dx * rng_thick]).astype(int)
-                rr, cc = draw.line(r0, c0, r1, c1)
-                lin = LineString([(r0, c0), (r1, c1)])
+                if dl is not None:
+                    nsteps = int(rng_thick / dl)
+                    x0 = px + dy * rng_thick / 2
+                    y0 = py - dx * rng_thick / 2
+                    _x = -dl * dy
+                    _y = dl * dx
+                    cc, rr = list(), list()
+                    for n in range(nsteps):
+                        # note that rows and cols are interchanged to account for another rotation
+                        rr.append(x0 + n * _x)
+                        cc.append(y0 + n * _y)
+                    rr = np.array(rr, dtype=np.int16)
+                    cc = np.array(cc, dtype=np.int16)
+
+                else:
+                    # note that rows and cols are interchanged to account for another rotation
+                    r0, c0, r1, c1 = np.array([px + dy * rng_thick / 2, py - dx * rng_thick / 2,
+                                               px - dy * rng_thick / 2, py + dx * rng_thick / 2]).astype(int)
+                    rr, cc = draw.line(r0, c0, r1, c1)
+                lin = LineString([(rr[0], cc[0]), (rr[-1], cc[-1])])
 
                 yield lin, image[cc, rr]
