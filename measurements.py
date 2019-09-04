@@ -5,6 +5,7 @@ from math import sqrt
 
 import cv2
 import numpy as np
+import pandas as pd
 import scipy.ndimage as ndi
 import skimage.draw as draw
 import skimage.exposure as exposure
@@ -67,6 +68,15 @@ def eng_string(x, format='%s', si=False):
         exp3_text = 'e%s' % exp3
 
     return ('%s' + format + '%s') % (sign, x3, exp3_text)
+
+
+def vector_column_to_long_fmt(a, val_col, ix_col):
+    # transform signal and domain vectors into long format (see https://stackoverflow.com/questions/27263805
+    b = pd.DataFrame({
+        col: pd.Series(data=np.repeat(a[col].values, a[val_col].str.len()))
+        for col in a.columns.drop([val_col, ix_col])}
+    ).assign(**{ix_col: np.concatenate(a[ix_col].values), val_col: np.concatenate(a[val_col].values)})[a.columns]
+    return b
 
 
 def pairwise(iterable):

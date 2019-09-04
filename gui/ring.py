@@ -2,6 +2,7 @@ import logging
 
 import numpy as np
 import pandas as pd
+import seaborn as sns
 from PyQt4 import QtCore, QtGui, uic
 from PyQt4.QtGui import QMainWindow, QWidget
 from matplotlib.figure import SubplotParams
@@ -10,6 +11,7 @@ from matplotlib.ticker import EngFormatter
 
 from gui._ring_label import RingImageQLabel
 from gui.gui_mplwidget import MplWidget
+import measurements as m
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger('ring.gui')
@@ -105,13 +107,24 @@ class RingWindow(QMainWindow):
         elif key == QtCore.Qt.Key_Left:
             print('Left Arrow Pressed')
 
-    def _graph(self):
+    def _graph_tendency(self):
+        df = pd.DataFrame(self.image.measurements).drop(['x', 'y', 'c', 'ls0', 'ls1', 'd', 'sum'], axis=1)
+        # flix = df.loc[:, "l"].apply(lambda v: v.ptp() > 1000)
+        # df = df[flix]
+        df.loc[:, "x"] = df.loc[:, "l"].apply(lambda v: np.arange(start=0, stop=len(v), step=1))
+        df = m.vector_column_to_long_fmt(df, val_col="l", ix_col="x")
+        sns.lineplot(x="x", y="l", data=df, ax=self.grph.ax, color='k', ci="sd", zorder=20)
+        self.grph.ax.set_ylabel('')
+        self.grph.ax.set_xlabel('')
+        self.grph.canvas.draw()
+
+    def _graph(self, alpha=1.0):
         if self.image.measurements is not None:
             self.grph.ax.cla()
             for me in self.image.measurements:
                 x = np.arange(start=0, stop=len(me['l']), step=1)
-                self.grph.ax.plot(x, me['l'], linewidth=0.5, linestyle='-', color=me['c'])
-                self.grph.format_ax()
+                self.grph.ax.plot(x, me['l'], linewidth=0.5, linestyle='-', color=me['c'], alpha=alpha, zorder=10)
+            self.grph.format_ax()
             self.statusbar.showMessage("ptp: %s" % ["%d " % me['d'] for me in self.image.measurements])
             self.grph.canvas.draw()
 
@@ -154,6 +167,8 @@ class RingWindow(QMainWindow):
     def on_me_button(self):
         logger.info('on_me_button')
         self.image.paint_measures()
+        self._graph(alpha=0.2)
+        self._graph_tendency()
 
     @QtCore.pyqtSlot()
     def on_zvalue_change(self):
@@ -188,6 +203,8 @@ class RingWindow(QMainWindow):
             new.loc[:, "m"] = self.measure_n
             new.loc[:, "z"] = self.image.zstack
             new.loc[:, "file"] = os.path.basename(self.image.file)
+            dl = 0.05
+            new.loc[:, "x"] = new.loc[:, "l"].apply(lambda v: np.arange(start=0, stop=len(v), step=1))
             self.df = self.df.append(new, ignore_index=True, sort=False)
             self.measure_n += 1
             print(self.df)
