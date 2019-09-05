@@ -210,6 +210,13 @@ class RingImageQLabel(QtGui.QLabel):
         self.setPixmap(self.image_pixmap)
         return
 
+    def resizeEvent(self, QResizeEvent):
+        # this is a hack to resize everithing when the user resizes the main window
+        if self.dwidth == 0: return
+        ratio = self.dheight / self.dwidth
+        self.setFixedWidth(self.width())
+        self.setFixedHeight(int(self.width()) * ratio)
+
     def paintEvent(self, event):
         if self.dataHasChanged:
             self.dataHasChanged = False
@@ -223,12 +230,12 @@ class RingImageQLabel(QtGui.QLabel):
             qtimage = QtGui.QImage(img_8bit.repeat(4), self.dwidth, self.dheight, QtGui.QImage.Format_RGB32)
             self.image_pixmap = QPixmap(qtimage)
             if self.render:
-                self.draw_measurements()
+                self._draw_measurements()
             self.setPixmap(self.image_pixmap)
 
         return QtGui.QLabel.paintEvent(self, event)
 
-    def draw_measurements(self):
+    def _draw_measurements(self):
         if self.sel_nuc is None: return
 
         painter = QPainter()

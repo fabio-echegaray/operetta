@@ -1,3 +1,5 @@
+import os
+import sys
 import logging
 
 import numpy as np
@@ -15,6 +17,7 @@ import measurements as m
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger('ring.gui')
+
 sp = SubplotParams(left=0., bottom=0., right=1., top=1.)
 mydpi = 72
 
@@ -28,7 +31,8 @@ class GraphWidget(QWidget):
 
     def __init__(self):
         super(GraphWidget, self).__init__()
-        uic.loadUi('./gui_ring_graph.ui', self)
+        path = os.path.join(sys.path[0], __package__)
+        uic.loadUi(os.path.join(path, 'gui_ring_graph.ui'), self)
         self.graphWidget.clear()
         self.format_ax()
 
@@ -48,6 +52,9 @@ class GraphWidget(QWidget):
         self.ax.yaxis.set_major_formatter(EngFormatter(unit=''))
         self.ax.set_ylim((0, 3e4))
 
+    def resizeEvent(self, event):
+        self.graphWidget.setFixedWidth(self.width())
+
 
 class RingWindow(QMainWindow):
     image: RingImageQLabel
@@ -55,43 +62,73 @@ class RingWindow(QMainWindow):
 
     def __init__(self):
         super(RingWindow, self).__init__()
-        uic.loadUi('./gui_ring.ui', self)
-        self.move(50, 100)
-        self.zSpin.valueChanged.connect(self.on_zvalue_change)
-        self.openButton.pressed.connect(self.on_open_button)
-        self.addButton.pressed.connect(self.on_add_button)
-        self.measureButton.pressed.connect(self.on_me_button)
-        self.dnaSpin.valueChanged.connect(self.on_dnaval_change)
-        self.actSpin.valueChanged.connect(self.on_actval_change)
-        self.dnaChk.toggled.connect(self.on_img_toggle)
-        self.actChk.toggled.connect(self.on_img_toggle)
-        self.image.clicked.connect(self.on_img_click)
-        self.renderChk.stateChanged.connect(self.on_render_chk)
+        path = os.path.join(sys.path[0], __package__)
 
-        self.image.dna_channel = self.dnaSpin.value()
-        self.image.act_channel = self.actSpin.value()
+        uic.loadUi(os.path.join(path, 'gui_ring.ui'), self)
+        self.move(50, 100)
+
+        self.ctrl = QWidget()
+        uic.loadUi(os.path.join(path, 'gui_ring_controls.ui'), self.ctrl)
+        self.ctrl.show()
+
+        self.ctrl.zSpin.valueChanged.connect(self.on_zvalue_change)
+        self.ctrl.openButton.pressed.connect(self.on_open_button)
+        self.ctrl.addButton.pressed.connect(self.on_add_button)
+        self.ctrl.measureButton.pressed.connect(self.on_me_button)
+        self.ctrl.dnaSpin.valueChanged.connect(self.on_dnaval_change)
+        self.ctrl.actSpin.valueChanged.connect(self.on_actval_change)
+        self.ctrl.dnaChk.toggled.connect(self.on_img_toggle)
+        self.ctrl.actChk.toggled.connect(self.on_img_toggle)
+        self.ctrl.renderChk.stateChanged.connect(self.on_render_chk)
+
+        self.image.clicked.connect(self.on_img_click)
+        self.image.dna_channel = self.ctrl.dnaSpin.value()
+        self.image.act_channel = self.ctrl.actSpin.value()
+        # layout = QtGui.QBoxLayout()
 
         self.grph = GraphWidget()
-        ph = self.geometry().height()
-        px = self.geometry().x()
-        py = self.geometry().y()
-        dw = self.grph.width()
-        dh = self.grph.height()
-        self.grph.setGeometry(px, py + ph + 50, dw, dh)
         self.grph.show()
+
+        self.image.dna_channel = self.ctrl.dnaSpin.value()
+        self.image.act_channel = self.ctrl.actSpin.value()
 
         self.measure_n = 0
 
         self.df = pd.DataFrame()
-
         self.file = "/Users/Fabio/data/lab/airyscan/nil.czi"
+
+        self.resizeEvent(None)
+        self.moveEvent(None)
+
+    def resizeEvent(self, event):
+        # this is a hack to resize everithing when the user resizes the main window
+        self.grph.setFixedWidth(self.width())
+        self.image.setFixedWidth(self.width())
+        self.image.setFixedHeight(self.height())
+        self.image.resizeEvent(None)
+        self.moveEvent(None)
+
+    def moveEvent(self, QMoveEvent):
+        px = self.geometry().x()
+        py = self.geometry().y()
+        pw = self.geometry().width()
+        ph = self.geometry().height()
+
+        dw = self.ctrl.width()
+        dh = self.ctrl.height()
+        self.ctrl.setGeometry(px + pw, py, dw, dh)
+
+        dw = self.grph.width()
+        dh = self.grph.height()
+        self.grph.setGeometry(px, py + ph + 20, dw, dh)
 
     def closeEvent(self, event):
         if not self.df.empty:
-            self.df.loc[:, "condition"] = self.experimentLineEdit.text()
+            self.df.loc[:, "condition"] = self.ctrl.experimentLineEdit.text()
             self.df.loc[:, "l"] = self.df.loc[:, "l"].apply(lambda v: np.array2string(v, separator=','))
             self.df.to_csv("out.csv")
         self.grph.close()
+        self.ctrl.close()
 
     def showEvent(self, event):
         self.setFocus()
@@ -131,15 +168,15 @@ class RingWindow(QMainWindow):
     @QtCore.pyqtSlot()
     def on_img_toggle(self):
         logger.info('on_img_toggle')
-        if self.dnaChk.isChecked():
+        if self.ctrl.dnaChk.isChecked():
             self.image.active_ch = "dna"
-        if self.actChk.isChecked():
+        if self.ctrl.actChk.isChecked():
             self.image.active_ch = "act"
 
     @QtCore.pyqtSlot()
     def on_render_chk(self):
         logger.info('on_render_chk')
-        self.image.render = self.renderChk.isChecked()
+        self.image.render = self.ctrl.renderChk.isChecked()
 
     @QtCore.pyqtSlot()
     def on_open_button(self):
@@ -152,11 +189,11 @@ class RingWindow(QMainWindow):
         f = QtGui.QFileDialog.getOpenFileName(qfd, "Open File", path, flt)
         if len(f) > 0:
             self.image.file = f
-            self.image.zstack = self.zSpin.value()
-            self.image.dna_channel = self.dnaSpin.value()
-            self.nchLbl.setText("%d channels" % self.image.n_channels)
-            self.nzsLbl.setText("%d z-stacks" % self.image.n_zstack)
-            self.nfrLbl.setText("%d %s" % (self.image.n_frames, "frames" if self.image.n_frames > 1 else "frame"))
+            self.image.zstack = self.ctrl.zSpin.value()
+            self.image.dna_channel = self.ctrl.dnaSpin.value()
+            self.ctrl.nchLbl.setText("%d channels" % self.image.n_channels)
+            self.ctrl.nzsLbl.setText("%d z-stacks" % self.image.n_zstack)
+            self.ctrl.nfrLbl.setText("%d %s" % (self.image.n_frames, "frames" if self.image.n_frames > 1 else "frame"))
 
     @QtCore.pyqtSlot()
     def on_img_click(self):
@@ -173,26 +210,26 @@ class RingWindow(QMainWindow):
     @QtCore.pyqtSlot()
     def on_zvalue_change(self):
         logger.info('on_zvalue_change')
-        self.image.zstack = self.zSpin.value() % self.image.n_zstack
-        self.zSpin.setValue(self.image.zstack)
+        self.image.zstack = self.ctrl.zSpin.value() % self.image.n_zstack
+        self.ctrl.zSpin.setValue(self.image.zstack)
         self._graph()
 
     @QtCore.pyqtSlot()
     def on_dnaval_change(self):
         logger.info('on_dnaval_change')
-        val = self.dnaSpin.value() % self.image.n_channels
-        self.dnaSpin.setValue(val)
+        val = self.ctrl.dnaSpin.value() % self.image.n_channels
+        self.ctrl.dnaSpin.setValue(val)
         self.image.dna_channel = val
-        if self.dnaChk.isChecked():
+        if self.ctrl.dnaChk.isChecked():
             self.image.active_ch = "dna"
 
     @QtCore.pyqtSlot()
     def on_actval_change(self):
         logger.info('on_actval_change')
-        val = self.actSpin.value() % self.image.n_channels
-        self.actSpin.setValue(val)
+        val = self.ctrl.actSpin.value() % self.image.n_channels
+        self.ctrl.actSpin.setValue(val)
         self.image.act_channel = val
-        if self.actChk.isChecked():
+        if self.ctrl.actChk.isChecked():
             self.image.active_ch = "act"
 
     @QtCore.pyqtSlot()
@@ -218,6 +255,7 @@ if __name__ == '__main__':
     from PyQt4.Qt import PYQT_VERSION_STR
 
     base_path = os.path.abspath('%s' % os.getcwd())
+    logging.getLogger('matplotlib').setLevel(logging.ERROR)
     logging.info('Qt version:' + QT_VERSION_STR)
     logging.info('PyQt version:' + PYQT_VERSION_STR)
     logging.info('Working dir:' + os.getcwd())

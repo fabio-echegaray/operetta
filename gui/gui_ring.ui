@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>640</width>
-    <height>600</height>
+    <width>512</width>
+    <height>512</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -17,11 +17,17 @@
    <widget class="RingImageQLabel" name="image">
     <property name="geometry">
      <rect>
-      <x>10</x>
-      <y>10</y>
+      <x>0</x>
+      <y>0</y>
       <width>512</width>
       <height>512</height>
      </rect>
+    </property>
+    <property name="sizePolicy">
+     <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+      <horstretch>0</horstretch>
+      <verstretch>0</verstretch>
+     </sizepolicy>
     </property>
     <property name="palette">
      <palette>
@@ -100,220 +106,30 @@
      <bool>true</bool>
     </property>
    </widget>
-   <widget class="QLabel" name="label">
-    <property name="geometry">
-     <rect>
-      <x>540</x>
-      <y>110</y>
-      <width>41</width>
-      <height>16</height>
-     </rect>
-    </property>
-    <property name="text">
-     <string>z-pos</string>
-    </property>
-   </widget>
-   <widget class="QSpinBox" name="zSpin">
-    <property name="geometry">
-     <rect>
-      <x>540</x>
-      <y>130</y>
-      <width>53</width>
-      <height>24</height>
-     </rect>
-    </property>
-    <property name="minimum">
-     <number>0</number>
-    </property>
-    <property name="value">
-     <number>1</number>
-    </property>
-   </widget>
-   <widget class="QPushButton" name="openButton">
-    <property name="geometry">
-     <rect>
-      <x>530</x>
-      <y>20</y>
-      <width>101</width>
-      <height>32</height>
-     </rect>
-    </property>
-    <property name="text">
-     <string>Open Image</string>
-    </property>
-   </widget>
-   <widget class="QPushButton" name="addButton">
-    <property name="geometry">
-     <rect>
-      <x>540</x>
-      <y>60</y>
-      <width>71</width>
-      <height>32</height>
-     </rect>
-    </property>
-    <property name="text">
-     <string>Add</string>
-    </property>
-   </widget>
-   <widget class="QSpinBox" name="dnaSpin">
-    <property name="geometry">
-     <rect>
-      <x>550</x>
-      <y>270</y>
-      <width>53</width>
-      <height>24</height>
-     </rect>
-    </property>
-    <property name="value">
-     <number>2</number>
-    </property>
-   </widget>
-   <widget class="QSpinBox" name="actSpin">
-    <property name="geometry">
-     <rect>
-      <x>550</x>
-      <y>320</y>
-      <width>53</width>
-      <height>24</height>
-     </rect>
-    </property>
-    <property name="value">
-     <number>1</number>
-    </property>
-   </widget>
-   <widget class="QLabel" name="nzsLbl">
-    <property name="geometry">
-     <rect>
-      <x>540</x>
-      <y>170</y>
-      <width>81</width>
-      <height>16</height>
-     </rect>
-    </property>
-    <property name="text">
-     <string>nº of z stacks</string>
-    </property>
-   </widget>
-   <widget class="QLabel" name="nchLbl">
-    <property name="geometry">
-     <rect>
-      <x>540</x>
-      <y>190</y>
-      <width>81</width>
-      <height>16</height>
-     </rect>
-    </property>
-    <property name="text">
-     <string>nº of channels</string>
-    </property>
-   </widget>
-   <widget class="QLabel" name="nfrLbl">
-    <property name="geometry">
-     <rect>
-      <x>540</x>
-      <y>210</y>
-      <width>81</width>
-      <height>16</height>
-     </rect>
-    </property>
-    <property name="text">
-     <string>nº of frames</string>
-    </property>
-   </widget>
-   <widget class="QRadioButton" name="dnaChk">
-    <property name="geometry">
-     <rect>
-      <x>530</x>
-      <y>250</y>
-      <width>101</width>
-      <height>20</height>
-     </rect>
-    </property>
-    <property name="text">
-     <string>dna dna_channel</string>
-    </property>
-    <property name="checked">
-     <bool>true</bool>
-    </property>
-   </widget>
-   <widget class="QRadioButton" name="actChk">
-    <property name="geometry">
-     <rect>
-      <x>530</x>
-      <y>300</y>
-      <width>101</width>
-      <height>20</height>
-     </rect>
-    </property>
-    <property name="text">
-     <string>actin dna_channel</string>
-    </property>
-   </widget>
-   <widget class="QLineEdit" name="experimentLineEdit">
-    <property name="geometry">
-     <rect>
-      <x>332</x>
-      <y>530</y>
-      <width>191</width>
-      <height>21</height>
-     </rect>
-    </property>
-   </widget>
-   <widget class="QLabel" name="label_2">
-    <property name="geometry">
-     <rect>
-      <x>270</x>
-      <y>530</y>
-      <width>61</width>
-      <height>20</height>
-     </rect>
-    </property>
-    <property name="text">
-     <string>Condition</string>
-    </property>
-   </widget>
-   <widget class="QPushButton" name="measureButton">
-    <property name="geometry">
-     <rect>
-      <x>10</x>
-      <y>530</y>
-      <width>110</width>
-      <height>32</height>
-     </rect>
-    </property>
-    <property name="text">
-     <string>Show Measure</string>
-    </property>
-   </widget>
-   <widget class="QCheckBox" name="renderChk">
-    <property name="geometry">
-     <rect>
-      <x>530</x>
-      <y>360</y>
-      <width>101</width>
-      <height>41</height>
-     </rect>
-    </property>
-    <property name="text">
-     <string>Render
-measurements</string>
-    </property>
-    <property name="checked">
-     <bool>true</bool>
-    </property>
-   </widget>
   </widget>
   <widget class="QMenuBar" name="menubar">
    <property name="geometry">
     <rect>
      <x>0</x>
      <y>0</y>
-     <width>640</width>
+     <width>512</width>
      <height>22</height>
     </rect>
    </property>
+   <widget class="QMenu" name="menuFile">
+    <property name="title">
+     <string>File</string>
+    </property>
+    <addaction name="action_Open"/>
+   </widget>
+   <addaction name="menuFile"/>
   </widget>
   <widget class="QStatusBar" name="statusbar"/>
+  <action name="action_Open">
+   <property name="text">
+    <string>Open Image</string>
+   </property>
+  </action>
  </widget>
  <customwidgets>
   <customwidget>
