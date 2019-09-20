@@ -15,7 +15,6 @@ from gui._ring_label import RingImageQLabel
 from gui.gui_mplwidget import MplWidget
 import measurements as m
 
-logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger('ring.gui')
 
 sp = SubplotParams(left=0., bottom=0., right=1., top=1.)
@@ -105,7 +104,6 @@ class RingWindow(QMainWindow):
         self.image.linePicked.connect(self.onLinePickedFromImage)
         self.image.dnaChannel = self.ctrl.dnaSpin.value()
         self.image.actChannel = self.ctrl.actSpin.value()
-        # layout = QtGui.QBoxLayout()
 
         self.grph = GraphWidget()
         self.grph.show()
@@ -190,7 +188,7 @@ class RingWindow(QMainWindow):
 
     @QtCore.pyqtSlot()
     def onImgToggle(self):
-        logger.info('onImgToggle')
+        logger.debug('onImgToggle')
         if self.ctrl.dnaChk.isChecked():
             self.image.activeCh = "dna"
         if self.ctrl.actChk.isChecked():
@@ -198,12 +196,12 @@ class RingWindow(QMainWindow):
 
     @QtCore.pyqtSlot()
     def onRenderChk(self):
-        logger.info('onRenderChk')
+        logger.debug('onRenderChk')
         self.image.render = self.ctrl.renderChk.isChecked()
 
     @QtCore.pyqtSlot()
     def onOpenButton(self):
-        logger.info('onOpenButton')
+        logger.debug('onOpenButton')
         qfd = QtGui.QFileDialog()
         path = os.path.dirname(self.file)
         if self.image.file is not None:
@@ -220,27 +218,27 @@ class RingWindow(QMainWindow):
 
     @QtCore.pyqtSlot()
     def onImgUpdate(self):
-        logger.info('onImgUpdate')
+        logger.debug('onImgUpdate')
         self.ctrl.renderChk.setChecked(True)
         self._graph()
 
     @QtCore.pyqtSlot()
     def onMeasureButton(self):
-        logger.info('onMeasureButton')
+        logger.debug('onMeasureButton')
         self.image.paint_measures()
         self._graph(alpha=0.2)
         self._graphTendency()
 
     @QtCore.pyqtSlot()
     def onZValueChange(self):
-        logger.info('onZValueChange')
+        logger.debug('onZValueChange')
         self.image.zstack = self.ctrl.zSpin.value() % self.image.nZstack
         self.ctrl.zSpin.setValue(self.image.zstack)
         self._graph()
 
     @QtCore.pyqtSlot()
     def onDnaValChange(self):
-        logger.info('onDnaValChange')
+        logger.debug('onDnaValChange')
         val = self.ctrl.dnaSpin.value() % self.image.nChannels
         self.ctrl.dnaSpin.setValue(val)
         self.image.dnaChannel = val
@@ -250,7 +248,7 @@ class RingWindow(QMainWindow):
 
     @QtCore.pyqtSlot()
     def onActValChange(self):
-        logger.info('onActValChange')
+        logger.debug('onActValChange')
         val = self.ctrl.actSpin.value() % self.image.nChannels
         self.ctrl.actSpin.setValue(val)
         self.image.actChannel = val
@@ -260,7 +258,7 @@ class RingWindow(QMainWindow):
 
     @QtCore.pyqtSlot()
     def onAddButton(self):
-        logger.info('onAddButton')
+        logger.debug('onAddButton')
         if self.image.measurements is not None:
             new = pd.DataFrame(self.image.measurements)
             if self.selectedLine is not None:
@@ -275,7 +273,7 @@ class RingWindow(QMainWindow):
 
     @QtCore.pyqtSlot()
     def onLinePickedFromGraph(self):
-        logger.info('onLinePickedFromGraph')
+        logger.debug('onLinePickedFromGraph')
         self.selectedLine = self.grph.selectedLine if self.grph.selectedLine is not None else None
         if self.selectedLine is not None:
             self.image.selectedLine = self.selectedLine
@@ -283,7 +281,7 @@ class RingWindow(QMainWindow):
 
     @QtCore.pyqtSlot()
     def onLinePickedFromImage(self):
-        logger.info('onLinePickedFromImage')
+        logger.debug('onLinePickedFromImage')
         self.selectedLine = self.image.selectedLine['n'] if self.image.selectedLine is not None else None
         if self.selectedLine is not None:
             self.statusbar.showMessage("line %d selected" % self.selectedLine)

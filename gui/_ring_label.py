@@ -173,8 +173,8 @@ class RingImageQLabel(QtGui.QLabel):
             self._file = file
             self.images, self.pix_per_um, self.dt, self.nFrames, self.nChannels = find_image(file)
             self.nZstack = int(len(self.images) / self.nFrames / self.nChannels)
-            self.dataHasChanged = True
-            self.repaint()
+            self._repaint()
+            logger.info("pixels per um: %0.4f" % self.pix_per_um)
 
     def clear(self):
         imgarr = np.zeros(shape=(512, 512), dtype=np.uint32)
@@ -346,7 +346,8 @@ class RingImageQLabel(QtGui.QLabel):
                 painter.drawPolygon(Qt.QPolygon(nucb_qpoints))
 
         for me in self.measurements:
-            painter.setPen(QPen(QBrush(QColor(me['c'])), 10 if me == self.selectedLine else 5))
+            painter.setPen(
+                QPen(QBrush(QColor(me['c'])), 2 * self.pix_per_um if me == self.selectedLine else self.pix_per_um))
             pts = [Qt.QPoint(x, y) for x, y in [me['ls0'], me['ls1']]]
             painter.drawLine(pts[0], pts[1])
 

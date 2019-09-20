@@ -4,9 +4,12 @@ from PyQt4 import QtGui
 
 from gui.ring import RingWindow
 
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger('ring').setLevel(logging.INFO)
+logging.getLogger('hhlab').setLevel(logging.INFO)
+logging.getLogger('gui').setLevel(logging.INFO)
 logging.getLogger('matplotlib').setLevel(logging.ERROR)
-logger = logging.getLogger('ring.gui')
+logging.getLogger('PyQt4').setLevel(logging.ERROR)
 
 if __name__ == '__main__':
     import sys
