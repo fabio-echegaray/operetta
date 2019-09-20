@@ -33,6 +33,10 @@ class GraphWidget(QWidget):
         super(GraphWidget, self).__init__()
         path = os.path.join(sys.path[0], __package__)
         uic.loadUi(os.path.join(path, 'gui_ring_graph.ui'), self)
+        self.canvas.callbacks.connect('pick_event', self.on_pick)
+
+        self.line_picked = None
+
         self.graphWidget.clear()
         self.format_ax()
 
@@ -44,13 +48,26 @@ class GraphWidget(QWidget):
     def ax(self):
         return self.canvas.ax
 
+    def clear(self):
+        self.graphWidget.clear()
+        self.line_picked = None
+
+    def on_pick(self, event):
+        logger.info('on_pick')
+        for l in self.ax.lines:
+            l.set_linewidth(0.1)
+        event.artist.set_linewidth(0.5)
+        # logger.debug([l.get_label() for l in self.ax.lines])
+        self.line_picked=int(event.artist.get_label())
+        self.canvas.draw()
+
     def format_ax(self):
         self.ax.xaxis.set_major_locator(ticker.MultipleLocator(10))
         self.ax.xaxis.set_minor_locator(ticker.MultipleLocator(5))
         self.ax.yaxis.set_major_locator(ticker.MultipleLocator(1e4))
         self.ax.yaxis.set_minor_locator(ticker.MultipleLocator(5e3))
         self.ax.yaxis.set_major_formatter(EngFormatter(unit=''))
-        self.ax.set_ylim((0, 3e4))
+        # self.ax.set_ylim((0, 3e4))
 
     def resizeEvent(self, event):
         self.graphWidget.setFixedWidth(self.width())
@@ -65,7 +82,7 @@ class RingWindow(QMainWindow):
         path = os.path.join(sys.path[0], __package__)
 
         uic.loadUi(os.path.join(path, 'gui_ring.ui'), self)
-        self.move(50, 100)
+        self.move(50, 0)
 
         self.ctrl = QWidget()
         uic.loadUi(os.path.join(path, 'gui_ring_controls.ui'), self.ctrl)
@@ -126,7 +143,7 @@ class RingWindow(QMainWindow):
         if not self.df.empty:
             self.df.loc[:, "condition"] = self.ctrl.experimentLineEdit.text()
             self.df.loc[:, "l"] = self.df.loc[:, "l"].apply(lambda v: np.array2string(v, separator=','))
-            self.df.to_csv("out.csv")
+            self.df.to_csv("ringlines.csv")
         self.grph.close()
         self.ctrl.close()
 
@@ -157,10 +174,11 @@ class RingWindow(QMainWindow):
 
     def _graph(self, alpha=1.0):
         if self.image.measurements is not None:
-            self.grph.ax.cla()
+            self.grph.clear()
             for me in self.image.measurements:
                 x = np.arange(start=0, stop=len(me['l']), step=1)
-                self.grph.ax.plot(x, me['l'], linewidth=0.5, linestyle='-', color=me['c'], alpha=alpha, zorder=10)
+                self.grph.ax.plot(x, me['l'], linewidth=0.5, linestyle='-', color=me['c'], alpha=alpha, zorder=10,
+                                  picker=5, label=me['n'])
             self.grph.format_ax()
             self.statusbar.showMessage("ptp: %s" % ["%d " % me['d'] for me in self.image.measurements])
             self.grph.canvas.draw()
@@ -237,6 +255,8 @@ class RingWindow(QMainWindow):
         logger.info('on_add_button')
         if self.image.measurements is not None:
             new = pd.DataFrame(self.image.measurements)
+            if self.grph.line_picked is not None:
+                new = new.loc[new["n"] == self.grph.line_picked]
             new.loc[:, "m"] = self.measure_n
             new.loc[:, "z"] = self.image.zstack
             new.loc[:, "file"] = os.path.basename(self.image.file)

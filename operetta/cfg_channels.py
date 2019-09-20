@@ -874,6 +874,7 @@ class ConfiguredChannels(Montage):
                         # self._mdf.loc[ix, '%s_line_%02d_sum' % (tag, k)] = m.integral_over_line(image, lin).astype(int)
                         self._mdf.loc[ix, '%s_int_lines' % tag] = int(n_lines)
 
+                        # FIXME: not measuring nucleus
                         # lin = r_seg
                         r0, c0, r1, c1 = np.array(r_seg).flatten().astype(int)
                         rr, cc = draw.line(r0, c0, r1, c1)

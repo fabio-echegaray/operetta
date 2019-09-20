@@ -5,6 +5,7 @@ from PyQt4 import QtGui
 from gui.ring import RingWindow
 
 logging.basicConfig(level=logging.DEBUG)
+logging.getLogger('matplotlib').setLevel(logging.ERROR)
 logger = logging.getLogger('ring.gui')
 
 if __name__ == '__main__':
