@@ -85,9 +85,10 @@ def find_image(img_name, folder=None):
 
 
 def retrieve_image(image_arr, frame=0, zstack=0, channel=0, number_of_channels=1, number_of_zstacks=1):
-    ix = frame * (number_of_channels * number_of_zstacks) + zstack * number_of_channels + channel
-    logger.debug("retrieving frame %d of channel %d at s-stack=%d (index=%d)" % (frame, channel, zstack, ix))
-    return image_arr[ix]
+    if image_arr is not None:
+        ix = frame * (number_of_channels * number_of_zstacks) + zstack * number_of_channels + channel
+        logger.debug("retrieving frame %d of channel %d at s-stack=%d (index=%d)" % (frame, channel, zstack, ix))
+        return image_arr[ix]
 
 
 def image_iterator(image_arr, channel=0, number_of_frames=1):
