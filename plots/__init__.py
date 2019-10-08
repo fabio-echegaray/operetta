@@ -1,5 +1,6 @@
 import matplotlib
-from .utils import colors
+from .utils import colors, facs, render_cell, render_polygon, histogram_of_every_row, histogram_with_errorbars, \
+    set_axis_size
 from ._ring import Ring, eval_into_array
 
 # Type 2/TrueType fonts.

@@ -1,5 +1,6 @@
 import logging
 
+import plots as p
 from PyQt4 import QtGui
 
 from gui.ring import RingWindow

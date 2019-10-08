@@ -45,6 +45,7 @@ class RingImageQLabel(QtGui.QLabel):
 
         self.images = None
         self.pix_per_um = None
+        self.um_per_pix = None
         self.dt = None
         self.dl = 0.05
         self.nFrames = None
@@ -172,6 +173,7 @@ class RingImageQLabel(QtGui.QLabel):
             logger.info('Loading %s' % file)
             self._file = file
             self.images, self.pix_per_um, self.dt, self.nFrames, self.nChannels = find_image(file)
+            self.um_per_pix = 1 / self.pix_per_um
             self.nZstack = int(len(self.images) / self.nFrames / self.nChannels)
             self._repaint()
             logger.info("pixels per um: %0.4f" % self.pix_per_um)
@@ -352,3 +354,34 @@ class RingImageQLabel(QtGui.QLabel):
             painter.drawLine(pts[0], pts[1])
 
         painter.end()
+
+    def drawMeasurements(self, ax, pal):
+        if self.selNuc is None: return
+        from matplotlib import cm
+        from shapely import affinity
+        import plots as p
+
+        act_img = retrieve_image(self.images, channel=self.actChannel, number_of_channels=self.nChannels,
+                                 zstack=self.zstack, number_of_zstacks=self.nZstack, frame=0)
+
+        ext = [0, self.dwidth / self.pix_per_um, self.dheight / self.pix_per_um, 0]
+
+        ax.imshow(act_img, interpolation='none', extent=ext, cmap=cm.gray_r)
+
+        for n in [e["boundary"] for e in self._boudaries]:
+            n_um = affinity.scale(n, xfact=self.um_per_pix, yfact=self.um_per_pix, origin=(0, 0, 0))
+            p.render_polygon(n_um, zorder=10, ax=ax)
+
+        for me, c in zip(self.measurements, pal):
+            ax.plot([me['ls0'][0] / self.pix_per_um, me['ls1'][0] / self.pix_per_um],
+                    [me['ls0'][1] / self.pix_per_um, me['ls1'][1] / self.pix_per_um],
+                    linewidth=1, linestyle='-', color=c, alpha=1)
+
+        w = 20
+        c = self.selNuc.centroid
+        x0, y0 = c.x / self.pix_per_um - w, c.y / self.pix_per_um - w
+        ax.set_xlim([x0, x0 + 2 * w])
+        ax.set_ylim([y0, y0 + 2 * w])
+
+        ax.plot([x0 + 2, x0 + 12], [y0 + 2, y0 + 2], c='w', lw=4)
+        ax.text(x0 + 5, y0 + 3.5, '10 um', color='w', fontdict={'size': 7})

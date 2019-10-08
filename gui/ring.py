@@ -92,6 +92,7 @@ class RingWindow(QMainWindow):
         self.ctrl.zSpin.valueChanged.connect(self.onZValueChange)
         self.ctrl.openButton.pressed.connect(self.onOpenButton)
         self.ctrl.addButton.pressed.connect(self.onAddButton)
+        self.ctrl.plotButton.pressed.connect(self.onPlotButton)
         self.ctrl.measureButton.pressed.connect(self.onMeasureButton)
         self.ctrl.dnaSpin.valueChanged.connect(self.onDnaValChange)
         self.ctrl.actSpin.valueChanged.connect(self.onActValChange)
@@ -270,6 +271,40 @@ class RingWindow(QMainWindow):
             self.df = self.df.append(new, ignore_index=True, sort=False)
             self.measure_n += 1
             print(self.df)
+
+    @QtCore.pyqtSlot()
+    def onPlotButton(self):
+        logger.debug('onPlotButton')
+        if self.image.measurements is None: return
+        import matplotlib.pyplot as plt
+        import seaborn as sns
+        from matplotlib.gridspec import GridSpec
+
+        plt.style.use('bmh')
+        pal = sns.color_palette("Blues", n_colors=len(self.image.measurements))
+        fig = plt.figure(figsize=(2, 2 * 4), dpi=300)
+        gs = GridSpec(nrows=2, ncols=1, height_ratios=[4, 0.5])
+        ax1 = plt.subplot(gs[0, 0])
+        ax2 = plt.subplot(gs[1, 0])
+        self.image.drawMeasurements(ax1, pal)
+
+        lw = 1
+        for me, c in zip(self.image.measurements, pal):
+            x = np.arange(start=0, stop=len(me['l']) * self.image.dl, step=self.image.dl)
+            ax2.plot(x, me['l'], linewidth=lw, linestyle='-', color=c, alpha=1, zorder=10)
+
+        ax1.xaxis.set_major_locator(ticker.MultipleLocator(20))
+        ax1.xaxis.set_minor_locator(ticker.MultipleLocator(10))
+        ax1.yaxis.set_major_locator(ticker.MultipleLocator(20))
+        ax1.yaxis.set_minor_locator(ticker.MultipleLocator(10))
+
+        ax2.xaxis.set_major_locator(ticker.MultipleLocator(1))
+        ax2.xaxis.set_minor_locator(ticker.MultipleLocator(0.5))
+        ax2.yaxis.set_major_locator(ticker.MultipleLocator(1e4))
+        ax2.yaxis.set_minor_locator(ticker.MultipleLocator(5e3))
+        ax2.yaxis.set_major_formatter(EngFormatter(unit=''))
+
+        fig.savefig(os.path.basename(self.image.file) + ".pdf")
 
     @QtCore.pyqtSlot()
     def onLinePickedFromGraph(self):
