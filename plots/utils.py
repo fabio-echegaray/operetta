@@ -125,10 +125,10 @@ def render_polygon(polygon: Polygon, zorder=0, ax=None):
         ax = plt.gca()
 
     x, y = polygon.exterior.xy
-    ax.plot(x, y, color='white', linewidth=0.5, solid_capstyle='round', zorder=zorder)
+    ax.plot(x, y, color='red', linestyle="--", linewidth=0.5, solid_capstyle='round', zorder=zorder)
 
     path = pathify(polygon)
-    patch = PathPatch(path, facecolor='none', edgecolor='white', hatch='/////', lw=0.01, zorder=zorder)
+    patch = PathPatch(path, facecolor='none', edgecolor='red', hatch='/////', lw=0.01, zorder=zorder)
 
     ax.add_patch(patch)
     ax.set_aspect(1.0)
@@ -195,3 +195,15 @@ def histogram_with_errorbars(df, edges_col, value_col, ax=None):
     rng_std = np.std(df[value_col].values, axis=0)
     bincenters = 0.5 * (edges[1:] + edges[:-1])
     plt.bar(bincenters, rng_avg, width=np.diff(edges), yerr=rng_std, error_kw={"elinewidth": 1})
+
+
+def set_axis_size(w, h, ax=None):
+    """ w, h: width, height in inches """
+    if not ax: ax = plt.gca()
+    l = ax.figure.subplotpars.left
+    r = ax.figure.subplotpars.right
+    t = ax.figure.subplotpars.top
+    b = ax.figure.subplotpars.bottom
+    figw = float(w) / (r - l)
+    figh = float(h) / (t - b)
+    ax.figure.set_size_inches(figw, figh)

@@ -5,11 +5,17 @@ import argparse
 
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
 import enlighten
+from matplotlib.ticker import EngFormatter
 
 import operetta as o
-from plots import Ring
+import measurements as m
+from plots import colors as c
+from plots import eval_into_array
 
+plt.style.use('bmh')
 pd.set_option('display.width', 320)
 pd.set_option('display.max_columns', 30)
 pd.set_option('display.max_rows', 50)
@@ -59,36 +65,67 @@ def hist_area(edges, counts):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Does a ring analysis based on previous measurements.')
     parser.add_argument('folder', metavar='FOLDER', type=str,
-                        help='folder where operetta images reside')
+                        help='folder where ring images reside')
     args = parser.parse_args()
 
-    # import sys
-    # from PyQt4 import QtCore, QtGui, uic
-    # app = QtGui.QApplication(sys.argv)
-    # qfd = QtGui.QFileDialog()
-    # path = "/Volumes/Kidbeat/data"
-    # # f = QtGui.QFileDialog.getOpenFileName(qfd, "Select Directory", path, filter)
-    # f = QtGui.QFileDialog.getExistingDirectory(qfd, "Select Directory")
-    # print(f)
+    df = pd.DataFrame()
+    foldr = 0
+    for root, directories, filenames in os.walk(args.folder):
+        for filename in filenames:
+            ext = filename.split('.')[-1]
+            if ext == 'csv':
+                logger.info("loading %s" % os.path.join(root, filename))
+                f = pd.read_csv(os.path.join(root, filename))
+                f.loc[:, "folder"] = foldr
+                foldr += 1
+                df = (df.append(f, ignore_index=True, sort=False)
+                      .drop(columns=['Unnamed: 0', 'c', 'd', 'ls0', 'ls1', 'sum', 'x', 'y'])
+                      .pipe(eval_into_array, column_name="l")
+                      )
 
-    operetta = o.ConfiguredChannels(args.folder)
-    pl = Ring(operetta)
+    df.loc[:, "indiv"] = df.apply(lambda r: "%s|%s|%s|%s" % (r['m'], r['n'], r['z'], r['folder']), axis=1)
+    df.loc[:, "x"] = df.loc[:, "l"].apply(lambda v: np.arange(start=0, stop=len(v) * 0.05, step=0.05))
+    # df.loc[:, "l"] = df.loc[:, "l"].apply(lambda v: v / max(v))
+    print(df.columns)
+    print(df["condition"].unique())
+    print(df)
 
-    a = pl.lines_filtered
-    # get only one row per z-stack
-    idx = a.groupby(["unit"])["s_max"].transform(max) == a["s_max"]
-    a = a[idx]
+    x_var = 'x'
+    y_var = 'l'
+    b = m.vector_column_to_long_fmt(df, val_col=y_var, ix_col=x_var)
+    formatter = EngFormatter(unit='')
 
-    select_images(a, operetta.base_path)
-    # exit(0)
+    sns.set_palette([sns.xkcd_rgb["grey"], c.sussex_coral_red, c.sussex_cobalt_blue, c.sussex_deep_aquamarine])
+    _order = ["cycling", "arrest", "cyto-arr", "noc-arr"]
 
-    # pl.nuclei_filtered()
-    pl.dna_intensity()
-    pl.actin_intensity_and_density_histogram()
-    pl.actin_intensity_vs_density()
-    pl.dna_vs_actin_intesity()
-    pl.actin_ring()
-    pl.actin_ring_histograms()
-    pl.histogram_areas()
-    pl.line_measurements()
-    pl.line_integrals()
+    g = sns.FacetGrid(b, hue="condition", col='condition', col_wrap=2, col_order=_order, hue_order=_order, height=2)
+    g = (g.map_dataframe(sns.lineplot, x=x_var, y=y_var, style='folder', units='indiv', estimator=None, alpha=1, lw=0.2)
+         .set(xlim=(0, 4))
+         )
+    for _ax in g.axes:
+        _ax.xaxis.set_major_formatter(formatter)
+        _ax.yaxis.set_major_formatter(formatter)
+    path = o.ensure_dir(os.path.join(args.folder, 'lines_indiv.pdf'))
+    g.savefig(path)
+
+    g = sns.FacetGrid(b, hue="condition", col='condition', col_wrap=2, col_order=_order, hue_order=_order, height=2)
+    g = (g.map_dataframe(sns.lineplot, x=x_var, y=y_var, style='folder')
+         .set(xlim=(0, 4))
+         )
+    for _ax in g.axes:
+        _ax.xaxis.set_major_formatter(formatter)
+        _ax.yaxis.set_major_formatter(formatter)
+    path = o.ensure_dir(os.path.join(args.folder, 'lines_trend.pdf'))
+    g.savefig(path)
+
+    g = sns.FacetGrid(b, hue="condition", hue_order=_order, height=2)
+    g = (g.map_dataframe(sns.lineplot, x=x_var, y=y_var)
+         .set(xlim=(0, 4))
+         .add_legend()
+         )
+    for _ax in g.axes[0]:
+        # _ax.xaxis.set_major_formatter(formatter)
+        _ax.yaxis.set_major_formatter(formatter)
+    path = o.ensure_dir(os.path.join(args.folder, 'lines_overl.pdf'))
+    g.savefig(path)
+    plt.close()

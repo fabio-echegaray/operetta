@@ -13,6 +13,7 @@ import scipy.signal
 
 from plots.utils import histogram_of_every_row, histogram_with_errorbars
 import operetta as o
+import measurements as m
 import filters
 
 logger = logging.getLogger('ring')
@@ -389,13 +390,7 @@ class Ring():
         a.loc[:, "signal_n"] = a["signal"] - a["v_mean"]
         a.drop(columns=["v_mean", "crit", "signal", "x", "sum", "v_width", "xpeak"], inplace=True)
 
-        # transform signal and domain vectors into long format (see https://stackoverflow.com/questions/27263805
-        val_col = 'signal_n'
-        ix_col = 'x_center'
-        b = pd.DataFrame({
-            col: pd.Series(data=np.repeat(a[col].values, a[val_col].str.len()))
-            for col in a.columns.drop([val_col, ix_col])}
-        ).assign(**{ix_col: np.concatenate(a[ix_col].values), val_col: np.concatenate(a[val_col].values)})[a.columns]
+        b = m.vector_column_to_long_fmt(a, val_col='signal_n', ix_col='x_center')
 
         # build a new index
         b = b.set_index(['unit', 'variable'])

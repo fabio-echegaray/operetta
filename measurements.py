@@ -5,6 +5,7 @@ from math import sqrt
 
 import cv2
 import numpy as np
+import pandas as pd
 import scipy.ndimage as ndi
 import skimage.draw as draw
 import skimage.exposure as exposure
@@ -16,6 +17,10 @@ import skimage.segmentation as segmentation
 import skimage.transform as tf
 from shapely.geometry import Polygon, LineString
 from scipy.ndimage.morphology import distance_transform_edt
+from shapely.geometry.point import Point
+from shapely import affinity
+from shapely.wkt import dumps
+from shapely.geometry import LineString, MultiLineString, Polygon
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger('hhlab')
@@ -63,6 +68,15 @@ def eng_string(x, format='%s', si=False):
         exp3_text = 'e%s' % exp3
 
     return ('%s' + format + '%s') % (sign, x3, exp3_text)
+
+
+def vector_column_to_long_fmt(a, val_col, ix_col):
+    # transform signal and domain vectors into long format (see https://stackoverflow.com/questions/27263805
+    b = pd.DataFrame({
+        col: pd.Series(data=np.repeat(a[col].values, a[val_col].str.len()))
+        for col in a.columns.drop([val_col, ix_col])}
+    ).assign(**{ix_col: np.concatenate(a[ix_col].values), val_col: np.concatenate(a[val_col].values)})[a.columns]
+    return b
 
 
 def pairwise(iterable):
@@ -134,7 +148,7 @@ def generate_mask_from(polygon: Polygon, shape=None):
     return image
 
 
-def nuclei_segmentation(image, compute_distance=False, radius=10):
+def nuclei_segmentation(image, compute_distance=False, radius=10, simp_px=None):
     # apply threshold
     logger.debug('thresholding images')
     thresh_val = filters.threshold_otsu(image)
@@ -170,9 +184,12 @@ def nuclei_segmentation(image, compute_distance=False, radius=10):
     for k, contr in enumerate(contours):
         contr = tform(contr)
         contr[:, 0] *= -1
+        pol = Polygon(contr)
+        if simp_px is not None:
+            pol = pol.simplify(simp_px, preserve_topology=True)
         _list.append({
             'id': k,
-            'boundary': Polygon(contr)
+            'boundary': pol
         })
 
     return labels, _list
@@ -292,3 +309,64 @@ def is_valid_sample(frame_polygon, cell_polygon, nuclei_polygon, nuclei_list=Non
     logger.debug('sample accepted with an area ratio of %0.2f' % area_ratio)
 
     return True, None
+
+
+def measure_lines_around_polygon(image, polygon, pix_per_um=1, n_lines=3, rng_thick=3, dl=None):
+    width, height = image.shape
+    rng_thick *= pix_per_um
+    if dl is not None:
+        dl *= pix_per_um
+    angle_delta = 2 * np.pi / n_lines
+    frame = Polygon([(0, 0), (0, width), (height, width), (height, 0)]).buffer(-rng_thick)
+
+    minx, miny, maxx, maxy = polygon.bounds
+    radius = max(maxx - minx, maxy - miny)
+    for k, angle in enumerate([angle_delta * i for i in range(n_lines)]):
+        ray = LineString([polygon.centroid,
+                          (polygon.centroid.x + radius * np.cos(angle),
+                           polygon.centroid.y + radius * np.sin(angle))])
+        r_seg = ray.intersection(polygon)
+
+        if r_seg.is_empty:
+            continue
+        if type(r_seg) == MultiLineString:
+            r_seg = r_seg[0]
+
+        pt = Point(r_seg.coords[-1])
+        if not frame.contains(pt):
+            continue
+
+        for pt0, pt1 in pairwise(polygon.exterior.coords):
+            # if pt.touches(LineString([pt0, pt1])):
+            if Point(pt).distance(LineString([pt0, pt1])) < 1e-6:
+                # compute normal vector
+                dx = pt1[0] - pt0[0]
+                dy = pt1[1] - pt0[1]
+                # touching point of the polygon line segment
+                px, py = pt.x, pt.y
+                # normalize normal vector
+                alpha = np.arctan2(dy, dx)
+                dx, dy = np.cos(alpha), np.sin(alpha)
+
+                if dl is not None:
+                    nsteps = int(rng_thick / dl)
+                    x0 = px + dy * rng_thick / 2
+                    y0 = py - dx * rng_thick / 2
+                    _x = -dl * dy
+                    _y = dl * dx
+                    cc, rr = list(), list()
+                    for n in range(nsteps):
+                        # note that rows and cols are interchanged to account for another rotation
+                        rr.append(x0 + n * _x)
+                        cc.append(y0 + n * _y)
+                    rr = np.array(rr, dtype=np.int16)
+                    cc = np.array(cc, dtype=np.int16)
+
+                else:
+                    # note that rows and cols are interchanged to account for another rotation
+                    r0, c0, r1, c1 = np.array([px + dy * rng_thick / 2, py - dx * rng_thick / 2,
+                                               px - dy * rng_thick / 2, py + dx * rng_thick / 2]).astype(int)
+                    rr, cc = draw.line(r0, c0, r1, c1)
+                lin = LineString([(rr[0], cc[0]), (rr[-1], cc[-1])])
+
+                yield lin, image[cc, rr]
